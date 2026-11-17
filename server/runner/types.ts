@@ -1,7 +1,9 @@
-import type { Account, Capability, Usage } from '../../shared/types.ts';
+import type { Account, Capability, Lang, Usage } from '../../shared/types.ts';
 
 export interface TurnRequest {
   account: Account;
+  /** Language of the activity texts shown in the UI. */
+  lang: Lang;
   cwd: string;
   /** Extra folders the agent may read/write besides cwd (e.g. the shared .office folder). */
   extraDirs?: string[];

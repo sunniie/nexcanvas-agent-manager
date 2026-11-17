@@ -23,6 +23,34 @@ function readHead(file: string, bytes = 64 * 1024) {
   }
 }
 
+/** Call `fn` for each complete line, reading in 1 MB chunks; stops when fn returns true or after maxBytes. */
+function eachLine(file: string, maxBytes: number, fn: (line: string) => boolean) {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const chunk = Buffer.alloc(1024 * 1024);
+    let pos = 0;
+    let rest = Buffer.alloc(0);
+    while (pos < maxBytes) {
+      const n = fs.readSync(fd, chunk, 0, chunk.length, pos);
+      if (n <= 0) break;
+      pos += n;
+      let buf = Buffer.concat([rest, chunk.subarray(0, n)]);
+      let i: number;
+      while ((i = buf.indexOf(10)) >= 0) {
+        if (fn(buf.subarray(0, i).toString('utf8'))) return;
+        buf = buf.subarray(i + 1);
+      }
+      rest = Buffer.from(buf);
+    }
+    if (rest.length) fn(rest.toString('utf8'));
+  } catch {
+    /* unreadable */
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
 function textOf(content: any): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -57,27 +85,39 @@ export function findPastSessions(projectDir: string): PastSession[] {
       for (const file of fs.readdirSync(path.join(projects, f)).filter((x) => x.endsWith('.jsonl'))) {
         const full = path.join(projects, f, file);
         const stat = fs.statSync(full);
-        const head = readHead(full);
         let title = '';
         let started = stat.birthtimeMs;
         let messages = 0;
-        for (const line of head.split('\n')) {
+        // Scan whole lines (a first message with a pasted image can be megabytes long) until we find
+        // the first real user message; never skip a session just because the title is hard to find.
+        eachLine(full, 8 * 1024 * 1024, (line) => {
+          let j: any;
           try {
-            const j = JSON.parse(line);
-            if (j.type === 'user' || j.type === 'assistant') messages++;
-            if (!title && j.type === 'user') {
-              const t = cleanUserText(textOf(j.message?.content));
-              if (t && !NOISE.test(t)) {
-                title = t.slice(0, 90);
-                if (j.timestamp) started = Date.parse(j.timestamp);
-              }
-            }
+            j = JSON.parse(line);
           } catch {
-            /* partial line */
+            return false;
           }
-        }
-        if (!title) continue;
-        out.push({ provider: 'claude', id: file.replace('.jsonl', ''), file: full, startedAt: started, updatedAt: stat.mtimeMs, title, messages: Math.max(messages, Math.round(stat.size / 4000)) });
+          if (j.type === 'user' || j.type === 'assistant') messages++;
+          if (j.type === 'user' && !j.isMeta) {
+            const t = cleanUserText(textOf(j.message?.content));
+            if (t && !NOISE.test(t)) {
+              title = t.replace(/\s+/g, ' ').slice(0, 90);
+              if (j.timestamp) started = Date.parse(j.timestamp);
+              return true;
+            }
+          }
+          return false;
+        });
+        if (stat.size < 200) continue; // empty / aborted session
+        out.push({
+          provider: 'claude',
+          id: file.replace('.jsonl', ''),
+          file: full,
+          startedAt: started,
+          updatedAt: stat.mtimeMs,
+          title: title || '(Claude Code session)',
+          messages: Math.max(messages, Math.round(stat.size / 4000)),
+        });
       }
     }
   }
@@ -190,14 +230,25 @@ export function digestSession(s: PastSession, maxChars = 24000): string {
   if (body.length > maxChars) {
     // Recent history matters most: keep 25% from the start, 75% from the end.
     const headLen = Math.floor(maxChars * 0.25);
-    body = `${body.slice(0, headLen)}\n\n[... lược bớt phần giữa ...]\n\n${body.slice(-(maxChars - headLen))}`;
+    body = `${body.slice(0, headLen)}\n\n[... middle part omitted ...]\n\n${body.slice(-(maxChars - headLen))}`;
   }
   const date = new Date(s.startedAt).toISOString().slice(0, 10);
-  return `# Phiên ${s.provider} ${s.id} (${date})\nChủ đề: ${s.title}\n\n${body}\n`;
+  return `# ${s.provider} session ${s.id} (${date})\nTopic: ${s.title}\n\n${body}\n`;
 }
 
 /** Prompt the user pastes into an old chat to export a handoff document manually. */
-export const EXPORT_PROMPT = `Hãy viết một TÀI LIỆU BÀN GIAO (plain text) cho toàn bộ cuộc trò chuyện này, để một AI khác tiếp quản dự án mà không cần đọc lại lịch sử. Gồm đúng các mục:
+/** Prompt the user pastes into an old chat to export a handoff document manually. */
+export const EXPORT_PROMPTS: Record<'en' | 'vi' | 'zh', string> = {
+  en: `Write a HANDOFF DOCUMENT (plain text) for this entire conversation, so another AI can take over the project without reading the history. Include exactly these sections:
+1. Project goal and the user's requirements (keep the important ones verbatim).
+2. Technical decisions that were settled, and WHY.
+3. Current state: what is done, what is in progress.
+4. Important files/folders and their roles.
+5. Next steps, in priority order.
+6. Bugs/pitfalls encountered and how they were handled.
+7. The user's preferences/conventions (code style, language, tools).
+Be concise, use bullet points, no greetings. At most ~1500 words.`,
+  vi: `Hãy viết một TÀI LIỆU BÀN GIAO (plain text) cho toàn bộ cuộc trò chuyện này, để một AI khác tiếp quản dự án mà không cần đọc lại lịch sử. Gồm đúng các mục:
 1. Mục tiêu dự án & yêu cầu của người dùng (giữ nguyên các yêu cầu quan trọng).
 2. Các quyết định kỹ thuật đã chốt và LÝ DO.
 3. Trạng thái hiện tại: đã xong gì, đang dở gì.
@@ -205,4 +256,14 @@ export const EXPORT_PROMPT = `Hãy viết một TÀI LIỆU BÀN GIAO (plain tex
 5. Việc cần làm tiếp theo (theo thứ tự ưu tiên).
 6. Những lỗi/cạm bẫy đã gặp và cách đã xử lý.
 7. Sở thích/quy ước của người dùng (code style, ngôn ngữ, công cụ).
-Viết ngắn gọn, gạch đầu dòng, không chào hỏi. Tối đa ~1500 từ.`;
+Viết ngắn gọn, gạch đầu dòng, không chào hỏi. Tối đa ~1500 từ.`,
+  zh: `请为这整段对话写一份交接文档（纯文本），让另一个 AI 无需阅读历史记录即可接手项目。只包含以下部分：
+1. 项目目标与用户需求（重要需求保持原文）。
+2. 已确定的技术决策及其原因。
+3. 当前状态：已完成什么，进行中的是什么。
+4. 重要的文件/文件夹及其作用。
+5. 后续步骤（按优先级排序）。
+6. 遇到过的问题/坑以及处理方式。
+7. 用户的偏好/约定（代码风格、语言、工具）。
+简洁、使用要点列表、不要寒暄。最多约 1500 字。`,
+};

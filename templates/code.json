@@ -1,17 +1,40 @@
 {
   "id": "code",
-  "name": "Văn phòng Code",
-  "description": "Xây dựng, sửa lỗi và phát hành phần mềm.",
+  "icon": "💻",
   "maxEmployees": 6,
-  "workflow": "Lập kế hoạch → Phát triển → Review → Kiểm thử → Phát hành",
+  "workflow": "Plan → Implement → Review → Test → Ship",
+  "guidance": "This is a software office. Work happens in the project's source code. Prefer small, independently reviewable tasks with clear file scopes and runnable acceptance checks (tests, build, lint).",
   "roles": [
-    { "key": "dev", "title": "Developer", "duty": "Viết và sửa code theo task, giữ thay đổi nhỏ gọn, chạy test liên quan." },
-    { "key": "frontend", "title": "Frontend Dev", "duty": "Giao diện, component, state phía client, responsive." },
-    { "key": "backend", "title": "Backend Dev", "duty": "API, database, logic nghiệp vụ, hiệu năng phía server." },
-    { "key": "uiux", "title": "UI/UX Designer", "duty": "Thiết kế luồng, bố cục, design token, copy giao diện; hiện thực bằng CSS/markup khi cần." },
-    { "key": "tester", "title": "Tester / QA", "duty": "Viết và chạy test, tái hiện lỗi, báo cáo bằng chứng cụ thể." },
-    { "key": "reviewer", "title": "Code Reviewer", "duty": "Soát lỗi logic, bảo mật, chất lượng; đề xuất sửa cụ thể." },
-    { "key": "devops", "title": "DevOps", "duty": "Build, CI/CD, cấu hình môi trường, deploy." },
-    { "key": "docs", "title": "Technical Writer", "duty": "README, tài liệu API, hướng dẫn sử dụng." }
-  ]
+    { "key": "dev", "title": "Developer", "duty": "Write and fix code for the task, keep changes small, run the related tests." },
+    { "key": "frontend", "title": "Frontend Developer", "duty": "UI, components, client-side state, responsive layout." },
+    { "key": "backend", "title": "Backend Developer", "duty": "APIs, databases, business logic, server-side performance." },
+    { "key": "uiux", "title": "UI/UX Designer", "duty": "Flows, layout, design tokens, interface copy; implement them in CSS/markup when needed." },
+    { "key": "tester", "title": "Tester / QA", "duty": "Write and run tests, reproduce bugs, report concrete evidence." },
+    { "key": "reviewer", "title": "Code Reviewer", "duty": "Find logic, security and quality issues; propose concrete fixes." },
+    { "key": "devops", "title": "DevOps", "duty": "Build, CI/CD, environment configuration, deployment." },
+    { "key": "docs", "title": "Technical Writer", "duty": "README, API docs, usage guides." }
+  ],
+  "i18n": {
+    "en": {
+      "name": "Code Office",
+      "tagline": "Build, fix and ship software",
+      "description": "A software team that works in your repository: plans tasks, writes code on separate git branches, reviews diffs, runs tests and merges.",
+      "can": ["Features, bug fixes, refactors", "Tests, CI, build and deploy scripts", "Code review and documentation", "Parallel work on separate git branches"],
+      "cannot": ["Push or deploy without your one-time permission", "Access production systems or secrets you have not provided"]
+    },
+    "vi": {
+      "name": "Văn phòng Code",
+      "tagline": "Xây dựng, sửa lỗi và phát hành phần mềm",
+      "description": "Đội phần mềm làm việc ngay trong repo của bạn: lập kế hoạch, viết code trên nhánh git riêng, review diff, chạy test và gộp code.",
+      "can": ["Tính năng mới, sửa lỗi, refactor", "Test, CI, script build và deploy", "Review code và viết tài liệu", "Làm song song trên các nhánh git riêng"],
+      "cannot": ["Push hay deploy khi chưa được bạn cấp quyền", "Truy cập hệ thống production hay secret bạn chưa cung cấp"]
+    },
+    "zh": {
+      "name": "代码办公室",
+      "tagline": "构建、修复并发布软件",
+      "description": "直接在你的仓库中工作的软件团队：规划任务、在独立的 git 分支上编写代码、审查差异、运行测试并合并。",
+      "can": ["新功能、修复缺陷、重构", "测试、CI、构建与部署脚本", "代码审查与文档", "在独立 git 分支上并行工作"],
+      "cannot": ["未经你一次性授权不会推送或部署", "不会访问你未提供的生产系统或密钥"]
+    }
+  }
 }

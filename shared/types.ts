@@ -166,11 +166,15 @@ export type Phase =
   | 'staffing'
   | 'ready';
 
+export type LogTag = 'report' | 'done' | 'merge' | 'conflict' | 'sleep' | 'wake' | 'failover' | 'plan' | 'approve' | 'revise' | 'perm';
+
 export interface LogEntry {
   at: number;
+  /** Speaker id: an employee id ('lead' = the coordinator), 'system' or 'boss'. */
   who: string;
   kind: 'info' | 'speech' | 'tool' | 'error' | 'user' | 'system';
   text: string;
+  tag?: LogTag;
 }
 
 export interface Settings {
@@ -186,9 +190,20 @@ export interface Settings {
   failover: 'off' | 'same' | 'any';
 }
 
+export type Lang = 'en' | 'vi' | 'zh';
+export const LANGS: Lang[] = ['en', 'vi', 'zh'];
+export type OfficeType = 'code' | 'video' | 'other';
+export const MAX_OFFICES = 6;
+
 export interface OfficeState {
   version: 1;
-  template: string;
+  id: string;
+  name: string;
+  /** Office template id (code | video | other). */
+  template: OfficeType;
+  /** Language the agents write in (fixed when the office is created). */
+  language: Lang;
+  createdAt: number;
   phase: Phase;
   projectDir?: string;
   contextFiles: string[];
@@ -225,8 +240,45 @@ export interface PastSession {
   messages: number;
 }
 
+export interface OfficeSummary {
+  id: string;
+  name: string;
+  template: OfficeType;
+  projectDir?: string;
+  mainBranch?: string;
+  phase: Phase;
+  employees: number;
+  working: number;
+  sleeping: number;
+  openTasks: number;
+  doneTasks: number;
+  createdAt: number;
+}
+
+export interface TemplateText {
+  name: string;
+  tagline: string;
+  description: string;
+  can: string[];
+  cannot: string[];
+}
+
+export interface TemplateInfo {
+  id: OfficeType;
+  icon: string;
+  /** Not available yet: shown in the lobby behind a lock. */
+  locked?: boolean;
+  maxEmployees: number;
+  i18n: Record<Lang, TemplateText>;
+}
+
 export interface AppSnapshot {
-  office: OfficeState;
+  /** UI language; undefined until the user picks one on first launch. */
+  language?: Lang;
+  /** The open office; undefined = lobby. */
+  office?: OfficeState;
+  offices: OfficeSummary[];
+  templates: TemplateInfo[];
   accounts: Account[];
   models: Record<Provider, ModelOption[]>;
   skills: SkillInfo[];
@@ -235,4 +287,4 @@ export interface AppSnapshot {
 
 export type ServerEvent =
   | { type: 'snapshot'; data: AppSnapshot }
-  | { type: 'bubble'; employeeId: string; text: string };
+  | { type: 'bubble'; officeId: string; employeeId: string; text: string };

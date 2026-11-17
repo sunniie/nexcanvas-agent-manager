@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { accountEnv, codexLastContext, codexRolloutFiles, codexUsageFromFile } from '../accounts.ts';
 import { DEFAULT_CODEX_DIR, resolveBin } from '../paths.ts';
+import { tr } from '../i18n.ts';
+import type { Lang } from '../../shared/types.ts';
 import { LIMIT_PATTERN, extractJson, parseResetHint, shortPath, type TurnRequest, type TurnResult } from './types.ts';
 
 function sandboxFor(req: TurnRequest): string {
@@ -24,18 +26,18 @@ export function cleanCommand(cmd: string): string {
   return c.trim();
 }
 
-function describeItem(item: any): string | undefined {
+function describeItem(lang: Lang, item: any): string | undefined {
   switch (item?.type) {
     case 'command_execution':
       return `⌨️ ${cleanCommand(String(item.command ?? '')).slice(0, 60)}`;
     case 'file_change':
-      return `✏️ Sửa ${(item.changes ?? []).map((c: any) => shortPath(c.path)).slice(0, 2).join(', ')}`;
+      return `✏️ ${tr(lang, 'act.edit', { f: (item.changes ?? []).map((c: any) => shortPath(c.path)).slice(0, 2).join(', ') })}`;
     case 'web_search':
-      return '🌐 Tra cứu web';
+      return `🌐 ${tr(lang, 'act.web')}`;
     case 'mcp_tool_call':
       return `🔧 ${item.tool ?? 'tool'}`;
     case 'todo_list':
-      return '📝 Cập nhật checklist';
+      return `📝 ${tr(lang, 'act.todo')}`;
     default:
       return undefined;
   }
@@ -86,7 +88,7 @@ export function runCodex(req: TurnRequest): Promise<TurnResult> {
       else if (ev.type === 'item.started' || ev.type === 'item.completed') {
         if (ev.item?.type === 'agent_message' && ev.type === 'item.completed') result.text = ev.item.text ?? result.text;
         else if (ev.type === 'item.started' || ev.item?.type === 'file_change') {
-          const d = describeItem(ev.item);
+          const d = describeItem(req.lang, ev.item);
           if (d) req.onActivity?.(d);
         }
       } else if (ev.type === 'turn.completed') {

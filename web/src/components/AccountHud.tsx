@@ -1,19 +1,20 @@
 import { useState } from 'react';
 import type { Account, AppSnapshot, Provider } from '../../../shared/types';
 import { api, fmtCountdown, fmtTime } from '../api';
+import { t } from '../i18n';
 import { Modal, Potions, ProviderIcon, StatBar, timeAgo } from './ui';
 
 export function AccountHud({ snap }: { snap: AppSnapshot }) {
   const [adding, setAdding] = useState(false);
-  const staff = [snap.office.coordinator, ...snap.office.employees].filter(Boolean);
+  const staff = snap.office ? [snap.office.coordinator, ...snap.office.employees].filter(Boolean) : [];
   return (
     <div className="hud">
       {snap.accounts.map((a) => (
         <AccountCard key={a.id} acc={a} users={staff.filter((e) => e!.accountId === a.id).map((e) => e!.name)} />
       ))}
-      <button className="add-acc" onClick={() => setAdding(true)} title="Thêm tài khoản Claude / Codex khác">
+      <button className="add-acc" onClick={() => setAdding(true)} title={t('Add another Claude / Codex account')}>
         <span>＋</span>
-        <small>Tài khoản</small>
+        <small>{t('Account')}</small>
       </button>
       {adding && <AddAccount onClose={() => setAdding(false)} />}
     </div>
@@ -41,7 +42,7 @@ function AccountCard({ acc, users }: { acc: Account; users: string[] }) {
             {acc.label}
             {acc.plan && <span className="plan">{acc.plan.toUpperCase()}</span>}
           </b>
-          <small>{acc.loggedIn ? acc.displayName ?? acc.email : 'Chưa đăng nhập'}</small>
+          <small>{acc.loggedIn ? acc.displayName ?? acc.email ?? t('Signed in') : t('Not signed in')}</small>
         </div>
         <Potions acc={acc} />
       </div>
@@ -51,20 +52,28 @@ function AccountCard({ acc, users }: { acc: Account; users: string[] }) {
           <StatBar label="7D" kind="mp" usedPercent={acc.usage?.weekly?.usedPercent} resetsAt={acc.usage?.weekly?.resetsAt} compact />
           <div className="acc-foot">
             {cooling ? (
-              <span className="warn">😴 nghỉ đến {fmtTime(acc.coolingUntil!)}</span>
+              <span className="warn">😴 {t('resting until {time}', { time: fmtTime(acc.coolingUntil!) })}</span>
             ) : (
-              <span className={stale ? 'warn' : 'muted'} title={`5h reset sau ${fmtCountdown(acc.usage?.fiveHour?.resetsAt) || '?'} · 7 ngày reset sau ${fmtCountdown(acc.usage?.weekly?.resetsAt) || '?'}`}>
+              <span
+                className={stale ? 'warn' : 'muted'}
+                title={t('5h resets in {a} · 7d resets in {b}', { a: fmtCountdown(acc.usage?.fiveHour?.resetsAt) || '?', b: fmtCountdown(acc.usage?.weekly?.resetsAt) || '?' })}
+              >
                 {stale ? '⚠ ' : ''}
-                {timeAgo(acc.usage?.updatedAt)}{stale ? ' · bấm ↻' : ''}
+                {timeAgo(acc.usage?.updatedAt)}
+                {stale ? ` · ${t('press ↻')}` : ''}
               </span>
             )}
             <span className="row tight">
-              {users.length > 0 && <span className="users" title={`Đang dùng: ${users.join(', ')}`}>👥{users.length}</span>}
+              {users.length > 0 && (
+                <span className="users" title={t('Used by: {names}', { names: users.join(', ') })}>
+                  👥{users.length}
+                </span>
+              )}
               <button
                 className="mini-btn"
                 onClick={probe}
                 disabled={probing}
-                title={acc.provider === 'claude' ? 'Đo hạn mức (chạy 1 lượt Haiku rất nhỏ)' : 'Làm mới hạn mức (miễn phí)'}
+                title={acc.provider === 'claude' ? t('Measure quota (runs one tiny Haiku turn)') : t('Refresh quota (free)')}
               >
                 {probing ? '…' : '↻'}
               </button>
@@ -72,7 +81,9 @@ function AccountCard({ acc, users }: { acc: Account; users: string[] }) {
           </div>
         </>
       ) : (
-        <button className="px-btn tiny primary" onClick={() => api('accounts/login', { id: acc.id })}>Đăng nhập</button>
+        <button className="px-btn tiny primary" onClick={() => api('accounts/login', { id: acc.id })}>
+          {t('Sign in')}
+        </button>
       )}
     </div>
   );
@@ -84,12 +95,10 @@ function AddAccount({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<'form' | 'wait'>('form');
   const [err, setErr] = useState('');
   return (
-    <Modal title="Thêm tài khoản" icon="🔑" onClose={onClose}>
+    <Modal title={t('Add an account')} icon="🔑" onClose={onClose}>
       {step === 'form' ? (
         <>
-          <p className="muted">
-            Mỗi tài khoản có thư mục cấu hình riêng, nên chạy song song được 2 tài khoản Claude hoặc 2 tài khoản Codex. Một cửa sổ terminal sẽ mở ra để bạn đăng nhập.
-          </p>
+          <p className="muted">{t('Each account gets its own config folder, so two Claude or two Codex accounts can run side by side. A terminal window opens so you can sign in.')}</p>
           <div className="choice-row">
             {(['claude', 'codex'] as Provider[]).map((p) => (
               <button key={p} className={`choice ${provider === p ? 'on' : ''}`} onClick={() => setProvider(p)}>
@@ -99,12 +108,12 @@ function AddAccount({ onClose }: { onClose: () => void }) {
             ))}
           </div>
           <label className="field">
-            Tên gợi nhớ
-            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={provider === 'claude' ? 'vd: Claude công ty' : 'vd: Codex phụ'} />
+            {t('Nickname')}
+            <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={provider === 'claude' ? t('e.g. Work Claude') : t('e.g. Second Codex')} />
           </label>
           {err && <p className="error">{err}</p>}
           <div className="actions">
-            <button className="px-btn" onClick={onClose}>Hủy</button>
+            <button className="px-btn" onClick={onClose}>{t('Cancel')}</button>
             <button
               className="px-btn primary"
               onClick={async () => {
@@ -116,7 +125,7 @@ function AddAccount({ onClose }: { onClose: () => void }) {
                 }
               }}
             >
-              Mở cửa sổ đăng nhập →
+              {t('Open the sign-in window')} →
             </button>
           </div>
         </>
@@ -124,7 +133,7 @@ function AddAccount({ onClose }: { onClose: () => void }) {
         <>
           <div className="wait-login">
             <div className="loader" />
-            <p>Hoàn tất đăng nhập trong cửa sổ terminal vừa mở, rồi bấm nút bên dưới.</p>
+            <p>{t('Finish signing in in the terminal window that just opened, then press the button below.')}</p>
           </div>
           <div className="actions">
             <button
@@ -134,7 +143,7 @@ function AddAccount({ onClose }: { onClose: () => void }) {
                 onClose();
               }}
             >
-              ✓ Tôi đã đăng nhập xong
+              ✓ {t('I have signed in')}
             </button>
           </div>
         </>

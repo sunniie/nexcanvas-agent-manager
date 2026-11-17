@@ -1,5 +1,6 @@
 // Pixel office renderer. Everything is drawn procedurally with fillRect — no third-party art.
-import type { Account, AppSnapshot, Employee, Task } from '../../../shared/types';
+import type { Account, AppSnapshot, Employee, OfficeType, Task } from '../../../shared/types';
+import { t as tr } from '../i18n';
 
 export const T = 16; // tile size in logical pixels
 export const COLS = 30;
@@ -131,7 +132,51 @@ function drawChair(ctx: CanvasRenderingContext2D, d: Pt) {
   rect(ctx, s.x - 5, s.y + 11, 10, 2, '#1d1f30');
 }
 
-function buildStatic(hour: number): HTMLCanvasElement {
+/** Floor palette + props per office type, so each office feels like its own place. */
+const FLOORS: Record<OfficeType, { a: string; b: string; line: string; grain: boolean }> = {
+  code: { a: '#c8925a', b: '#bb8650', line: '#a6743f', grain: true },
+  video: { a: '#3d4258', b: '#383d52', line: '#2f3346', grain: false },
+  other: { a: '#5f8f86', b: '#59877e', line: '#4c766e', grain: false },
+};
+
+function drawThemeProps(ctx: CanvasRenderingContext2D, theme: OfficeType) {
+  if (theme === 'video') {
+    // camera on a tripod
+    const cx = 6 * T;
+    const cy = 13.6 * T;
+    rect(ctx, cx - 1, cy + 10, 2, 14, '#1d1f30');
+    rect(ctx, cx - 7, cy + 22, 14, 2, '#1d1f30');
+    rect(ctx, cx - 8, cy, 16, 10, '#20232f');
+    rect(ctx, cx + 8, cy + 2, 6, 6, '#20232f');
+    rect(ctx, cx - 5, cy + 3, 4, 4, '#7fd6ff');
+    rect(ctx, cx + 3, cy + 1, 2, 2, '#ff5a6e');
+    // softbox light
+    const lx = 12.5 * T;
+    rect(ctx, lx - 1, cy + 6, 2, 18, '#1d1f30');
+    rect(ctx, lx - 6, cy + 22, 12, 2, '#1d1f30');
+    rect(ctx, lx - 9, cy - 4, 18, 12, '#f4f5fa');
+    rect(ctx, lx - 7, cy - 2, 14, 8, '#fff6cf');
+    // clapperboard on the floor
+    rect(ctx, 16 * T, cy + 12, 14, 10, '#1d1f30');
+    for (let i = 0; i < 3; i++) rect(ctx, 16 * T + 1 + i * 5, cy + 9, 3, 3, '#f4f5fa');
+  } else if (theme === 'other') {
+    // globe on a stand
+    const gx = 6 * T;
+    const gy = 14 * T;
+    rect(ctx, gx - 1, gy + 8, 2, 10, '#5e3b1b');
+    rect(ctx, gx - 6, gy + 17, 12, 2, '#5e3b1b');
+    rect(ctx, gx - 7, gy - 4, 14, 13, '#4a90e2');
+    rect(ctx, gx - 4, gy - 2, 5, 4, '#50b36b');
+    rect(ctx, gx + 1, gy + 3, 4, 3, '#50b36b');
+    // beanbag + stack of documents
+    rect(ctx, 12 * T, gy + 6, 22, 12, '#e45f9b');
+    rect(ctx, 12 * T + 3, gy + 4, 16, 6, '#f07bb1');
+    for (let i = 0; i < 4; i++) rect(ctx, 16 * T, gy + 14 - i * 3, 14, 2, i % 2 ? '#f4f5fa' : '#d8dbe6');
+  }
+}
+
+function buildStatic(hour: number, theme: OfficeType = 'code'): HTMLCanvasElement {
+  const F = FLOORS[theme];
   const cv = document.createElement('canvas');
   cv.width = W;
   cv.height = H;
@@ -143,9 +188,9 @@ function buildStatic(hour: number): HTMLCanvasElement {
       const px = x * T;
       const py = y * T;
       if (x < 20) {
-        rect(ctx, px, py, T, T, (x + y) % 2 ? C.wood1 : C.wood2);
-        rect(ctx, px, py + T - 1, T, 1, C.woodLine);
-        if ((x * 7 + y * 3) % 5 === 0) rect(ctx, px + T / 2, py, 1, T - 1, C.woodLine);
+        rect(ctx, px, py, T, T, (x + y) % 2 ? F.a : F.b);
+        rect(ctx, px, py + T - 1, T, 1, F.line);
+        if (F.grain && (x * 7 + y * 3) % 5 === 0) rect(ctx, px + T / 2, py, 1, T - 1, F.line);
       } else if (x > 20 && y < 11) {
         rect(ctx, px, py, T, T, (x + y) % 2 ? C.carpet1 : C.carpet2);
       } else if (x > 20) {
@@ -170,7 +215,7 @@ function buildStatic(hour: number): HTMLCanvasElement {
   // partition wall between floor and lead's room / lounge
   rect(ctx, 20 * T, 3 * T, T, 13 * T, C.wallDark);
   rect(ctx, 20 * T + 3, 3 * T, T - 6, 13 * T, C.wallTrim);
-  rect(ctx, 20 * T, 7.6 * T, T, 2 * T, C.wood2); // doorway to lead's room
+  rect(ctx, 20 * T, 7.6 * T, T, 2 * T, F.b); // doorway to lead's room
   rect(ctx, 20 * T, 12 * T, T, 2 * T, C.lounge1); // doorway to lounge
   rect(ctx, 21 * T, 11 * T - 2, 9 * T, 3, C.wallTrim); // room divider
   rect(ctx, 24 * T, 11 * T - 2, 2 * T, 3, C.lounge2);
@@ -208,6 +253,7 @@ function buildStatic(hour: number): HTMLCanvasElement {
   for (let i = 0; i < 4; i++) rect(ctx, 0.5 * T + 3, 16.3 * T + i * 6, T * 1.2 - 6, 4, '#2a2d48');
 
   for (const d of DESKS) drawChair(ctx, d);
+  drawThemeProps(ctx, theme);
   return cv;
 }
 
@@ -346,6 +392,7 @@ export class OfficeEngine {
   private ctx: CanvasRenderingContext2D;
   private staticLayer: HTMLCanvasElement;
   private staticHour = -1;
+  private theme: OfficeType = 'code';
   private actors = new Map<string, Actor>();
   private snap?: AppSnapshot;
   private raf = 0;
@@ -389,6 +436,12 @@ export class OfficeEngine {
 
   setSnapshot(s: AppSnapshot) {
     this.snap = s;
+    const theme = s.office?.template ?? 'code';
+    if (theme !== this.theme) {
+      this.theme = theme;
+      this.staticHour = -1; // rebuild the static layer with the new floor/props
+      this.actors.clear();
+    }
     const staff = this.staff();
     for (const e of staff) {
       let a = this.actors.get(e.id);
@@ -432,7 +485,7 @@ export class OfficeEngine {
   }
 
   private destFor(e: Employee): { key: string; pt: Pt } {
-    const o = this.snap!.office;
+    const o = this.snap!.office!;
     if (e.status === 'sleeping') {
       const sleepers = this.staff().filter((x) => x.status === 'sleeping');
       const i = Math.max(0, sleepers.findIndex((x) => x.id === e.id));
@@ -471,7 +524,7 @@ export class OfficeEngine {
     this.last = now;
     const hour = new Date().getHours();
     if (hour !== this.staticHour) {
-      this.staticLayer = buildStatic(hour);
+      this.staticLayer = buildStatic(hour, this.theme);
       this.staticHour = hour;
     }
     for (const a of this.actors.values()) this.step(a, dt);
@@ -516,7 +569,7 @@ export class OfficeEngine {
 
     const staff = this.staff();
     const accounts = new Map<string, Account>((s?.accounts ?? []).map((a) => [a.id, a]));
-    drawWhiteboard(ctx, s?.office.tasks ?? []);
+    drawWhiteboard(ctx, s?.office?.tasks ?? []);
     drawClock(ctx, new Date());
 
     // desks + monitors (only for occupied seats, so the office "grows" with the team)
@@ -536,7 +589,7 @@ export class OfficeEngine {
         rect(ctx, d.x + 5, d.y + 0.7 * T + 3, 4, 2, '#8a6d1d');
       }
     });
-    const lead = s?.office.coordinator;
+    const lead = s?.office?.coordinator;
     const leadActor = lead && this.actors.get(lead.id);
     drawMonitor(ctx, LEAD_DESK, !!leadActor && leadActor.pose === 'sit', lead?.status === 'working', t, '#f2e85c');
 
@@ -597,7 +650,7 @@ export class OfficeEngine {
       ctx.fillStyle = this.hover === e.id ? '#12131f' : '#f4f5fa';
       ctx.fillText(label, bx + padX + 9 * dpr, p.y + fs + 1 * dpr);
 
-      const bubble = a.bubble && a.bubble.until > nowMs ? a.bubble.text : e.status === 'sleeping' ? '😴 ' + (e.statusText ?? 'Đang nghỉ') : undefined;
+      const bubble = a.bubble && a.bubble.until > nowMs ? a.bubble.text : e.status === 'sleeping' ? '😴 ' + (e.statusText ?? tr('Napping')) : undefined;
       if (bubble) {
         const text = bubble.length > 46 ? bubble.slice(0, 45) + '…' : bubble;
         ctx.font = `600 ${fs}px "Be Vietnam Pro", system-ui, sans-serif`;

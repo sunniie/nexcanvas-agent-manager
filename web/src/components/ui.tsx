@@ -2,10 +2,13 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import type { Account, Employee, Provider } from '../../../shared/types';
 import { avatarURL, drawPortrait } from '../office/engine';
 import { fmtCountdown } from '../api';
+import { locale, t } from '../i18n';
 
 export function Modal({ title, onClose, children, wide, icon }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; icon?: string }) {
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
@@ -13,8 +16,11 @@ export function Modal({ title, onClose, children, wide, icon }: { title: string;
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal frame ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
         <div className="modal-head">
-          <h3>{icon && <span className="modal-icon">{icon}</span>}{title}</h3>
-          <button className="icon-btn" onClick={onClose} aria-label="Đóng">✕</button>
+          <h3>
+            {icon && <span className="modal-icon">{icon}</span>}
+            {title}
+          </h3>
+          <button className="icon-btn" onClick={onClose} aria-label={t('Close')}>✕</button>
         </div>
         <div className="modal-body">{children}</div>
       </div>
@@ -30,7 +36,7 @@ export function StatBar({ label, usedPercent, resetsAt, kind, compact }: { label
   return (
     <div
       className={`stat ${kind} ${tone} ${compact ? 'compact' : ''}`}
-      title={known ? `${label}: còn ${left}% · reset sau ${fmtCountdown(resetsAt) || '?'}` : 'Chưa có dữ liệu'}
+      title={known ? t('{label}: {left}% left · resets in {when}', { label, left, when: fmtCountdown(resetsAt) || '?' }) : t('No data yet')}
     >
       <span className="stat-label">{label}</span>
       <div className="stat-track">
@@ -69,9 +75,14 @@ export function Portrait({ e, size = 80 }: { e: Employee; size?: number }) {
 export function Potions({ acc }: { acc: Account }) {
   const n = acc.resetCredits?.count ?? 0;
   if (!n) return null;
-  const exp = acc.resetCredits?.expiresAt ? new Date(acc.resetCredits.expiresAt).toLocaleDateString('vi-VN') : '';
+  const exp = acc.resetCredits?.expiresAt ? new Date(acc.resetCredits.expiresAt).toLocaleDateString(locale()) : '';
+  const title = t('{n} free quota reset(s){title}{exp}. Use them in the Codex app.', {
+    n,
+    title: acc.resetCredits?.title ? ` — ${acc.resetCredits.title}` : '',
+    exp: exp ? ` · ${t('expires {date}', { date: exp })}` : '',
+  });
   return (
-    <span className="potions" title={`${n} lượt reset miễn phí${acc.resetCredits?.title ? ` — ${acc.resetCredits.title}` : ''}${exp ? ` · hết hạn ${exp}` : ''}. Dùng trong ứng dụng Codex.`}>
+    <span className="potions" title={title}>
       {Array.from({ length: Math.min(n, 3) }).map((_, i) => (
         <i key={i} className="potion" />
       ))}
@@ -102,7 +113,7 @@ export function Toggle({ checked, onChange, label, hint, danger }: { checked: bo
 }
 
 export function AccountLine({ acc }: { acc?: Account }) {
-  if (!acc) return <span className="muted">(không có tài khoản)</span>;
+  if (!acc) return <span className="muted">{t('(no account)')}</span>;
   return (
     <span className="acc-line">
       <i className="badge-dot" style={{ background: acc.color }} />
@@ -113,20 +124,16 @@ export function AccountLine({ acc }: { acc?: Account }) {
   );
 }
 
-export function accountsFor(accounts: Account[], provider?: Provider) {
-  return accounts.filter((a) => !provider || a.provider === provider);
-}
-
 export function timeAgo(at?: number) {
-  if (!at) return 'chưa rõ';
+  if (!at) return t('unknown');
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (s < 60) return 'vừa xong';
-  if (s < 3600) return `${Math.round(s / 60)} phút trước`;
-  if (s < 86400) return `${Math.round(s / 3600)} giờ trước`;
-  return `${Math.round(s / 86400)} ngày trước`;
+  if (s < 60) return t('just now');
+  if (s < 3600) return t('{n} min ago', { n: Math.round(s / 60) });
+  if (s < 86400) return t('{n} h ago', { n: Math.round(s / 3600) });
+  return t('{n} d ago', { n: Math.round(s / 86400) });
 }
 
-export const MODEL_TIER_LABEL: Record<string, string> = { max: 'Đỉnh nhất', high: 'Mạnh', standard: 'Cân bằng', light: 'Nhanh · rẻ' };
+export const tierLabel = (tier: string) => t(({ max: 'Top', high: 'Strong', standard: 'Balanced', light: 'Fast · cheap' } as Record<string, string>)[tier] ?? tier);
 
 /** Minimal, safe markdown: **bold**, `code`, "# heading" and "- " bullets. Rendered as React nodes (no innerHTML). */
 export function Rich({ text }: { text: string }) {

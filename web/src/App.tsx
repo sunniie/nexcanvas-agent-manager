@@ -1,61 +1,87 @@
 import { useEffect, useRef, useState } from 'react';
-import { CAPABILITY_LABELS, type AppSnapshot, type Capability, type Employee, type LogEntry } from '../../shared/types';
+import type { AppSnapshot, Capability, Employee, LogEntry } from '../../shared/types';
 import { api, onBubble, useSnapshot } from './api';
+import { getLang, setLang, t } from './i18n';
 import { OfficeEngine } from './office/engine';
 import { AccountHud } from './components/AccountHud';
 import { Setup } from './components/Setup';
-import { Workspace } from './components/Workspace';
-import { EmployeeDialog } from './components/EmployeeDialog';
+import { CAP_LABEL, Workspace } from './components/Workspace';
+import { EMP_STATUS, EmployeeDialog } from './components/EmployeeDialog';
+import { Lobby } from './components/Lobby';
+import { LanguagePicker, LanguageSwitch } from './components/LanguagePicker';
 import { Avatar, Modal, ProviderIcon } from './components/ui';
+
+const STAGE_TITLE = { code: 'CODE OFFICE', video: 'VIDEO STUDIO', other: 'OPEN OFFICE' } as const;
 
 export function App() {
   const { snap, connected } = useSnapshot();
   const [openEmp, setOpenEmp] = useState<string>();
+  if (snap?.language && snap.language !== getLang()) setLang(snap.language);
+  useEffect(() => {
+    setOpenEmp(undefined);
+  }, [snap?.office?.id]);
 
   if (!snap) {
     return (
       <div className="boot">
         <div className="logo-big">▣</div>
-        <b>NEXCANVAS OFFICE</b>
-        <p>{connected ? 'Đang mở văn phòng…' : 'Đang kết nối máy chủ cục bộ…'}</p>
+        <b>NEXCANVAS</b>
+        <p>{connected ? t('Opening the office…') : t('Connecting to the local server…')}</p>
       </div>
     );
   }
+  if (!snap.language) return <LanguagePicker />;
+
   const o = snap.office;
+  const tpl = o && snap.templates.find((x) => x.id === o.template);
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
+        <button className="brand" onClick={() => o && api('offices/close', {})} title={t('Back to the lobby')}>
           <span className="logo">▣</span>
-          <div>
+          <span>
             <b>NEXCANVAS</b>
-            <small>{o.projectDir ? o.projectDir.split(/[\\/]/).pop() : 'Văn phòng Code'}{o.mainBranch ? ` · ⎇ ${o.mainBranch}` : ''}</small>
-          </div>
-        </div>
+            <small>{o ? `${o.name}${o.mainBranch ? ` · ⎇ ${o.mainBranch}` : ''}` : t('Lobby')}</small>
+          </span>
+        </button>
+        {o && (
+          <button className="lobby-btn" onClick={() => api('offices/close', {})}>
+            ← {t('Offices')}
+            <span className="lobby-count">{snap.offices.length}</span>
+          </button>
+        )}
         <AccountHud snap={snap} />
-        <span className={`conn ${connected ? 'on' : ''}`} title={connected ? 'Đã kết nối' : 'Mất kết nối — đang thử lại'} />
+        <LanguageSwitch current={snap.language} />
+        <span className={`conn ${connected ? 'on' : ''}`} title={connected ? t('Connected') : t('Disconnected — retrying')} />
       </header>
-      <main className="main">
-        <section className="stage-col">
-          <OfficeStage snap={snap} selected={openEmp} onPick={setOpenEmp} />
-          <StaffDock snap={snap} selected={openEmp} onPick={setOpenEmp} />
-        </section>
-        <aside className="side frame">{o.phase === 'ready' ? <Workspace snap={snap} onOpenEmployee={setOpenEmp} /> : <Setup snap={snap} />}</aside>
-      </main>
-      {openEmp && <EmployeeDialog snap={snap} id={openEmp} onClose={() => setOpenEmp(undefined)} />}
-      {o.pendingPermission && <PermissionDialog snap={snap} />}
-      <Toasts log={o.log} />
+      {!o ? (
+        <main className="lobby-main">
+          <Lobby snap={snap} />
+        </main>
+      ) : (
+        <main className="main">
+          <section className="stage-col">
+            <OfficeStage snap={snap} selected={openEmp} onPick={setOpenEmp} title={tpl?.icon ? `${tpl.icon} ${STAGE_TITLE[o.template]}` : STAGE_TITLE[o.template]} />
+            <StaffDock snap={snap} selected={openEmp} onPick={setOpenEmp} />
+          </section>
+          <aside className="side frame">{o.phase === 'ready' ? <Workspace snap={snap} onOpenEmployee={setOpenEmp} /> : <Setup snap={snap} />}</aside>
+        </main>
+      )}
+      {o && openEmp && <EmployeeDialog snap={snap} id={openEmp} onClose={() => setOpenEmp(undefined)} />}
+      {o?.pendingPermission && <PermissionDialog snap={snap} />}
+      {o && <Toasts officeId={o.id} log={o.log} staff={[o.coordinator, ...o.employees].filter(Boolean) as Employee[]} />}
     </div>
   );
 }
 
 // ---------- office stage ----------
 
-function OfficeStage({ snap, selected, onPick }: { snap: AppSnapshot; selected?: string; onPick: (id: string) => void }) {
+function OfficeStage({ snap, selected, onPick, title }: { snap: AppSnapshot; selected?: string; onPick: (id: string) => void; title: string }) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<OfficeEngine | undefined>(undefined);
   const lastLog = useRef(0);
+  const officeId = snap.office!.id;
   const [hover, setHover] = useState<{ id: string; x: number; y: number }>();
 
   useEffect(() => {
@@ -63,32 +89,37 @@ function OfficeStage({ snap, selected, onPick }: { snap: AppSnapshot; selected?:
     engine.current = e;
     const ro = new ResizeObserver(([entry]) => e.resize(entry.contentRect.width, entry.contentRect.height));
     ro.observe(wrap.current!);
-    const off = onBubble((id, text) => e.say(id, text));
     return () => {
       ro.disconnect();
-      off();
       e.destroy();
     };
   }, []);
 
   useEffect(() => {
+    const off = onBubble((oid, id, text) => {
+      if (oid === officeId) engine.current?.say(id, text);
+    });
+    lastLog.current = Date.now();
+    return () => void off();
+  }, [officeId]);
+
+  useEffect(() => {
     const e = engine.current;
     if (!e) return;
     e.setSnapshot(snap);
-    const staff = [snap.office.coordinator, ...snap.office.employees].filter(Boolean);
-    for (const l of snap.office.log) {
+    // Speech lines from the office log become bubbles above the speaker.
+    for (const l of snap.office!.log) {
       if (l.at <= lastLog.current || l.kind !== 'speech') continue;
-      const who = staff.find((s) => s!.name === l.who);
-      if (who && Date.now() - l.at < 15000) e.say(who.id, l.text.replace(/\*\*/g, '').split('\n')[0], 6500);
+      if (Date.now() - l.at < 15000) e.say(l.who, l.text.replace(/\*\*/g, '').split('\n')[0], 6500);
     }
-    lastLog.current = snap.office.log.at(-1)?.at ?? lastLog.current;
+    lastLog.current = Math.max(lastLog.current, snap.office!.log.at(-1)?.at ?? 0);
   }, [snap]);
 
   useEffect(() => {
     if (engine.current) engine.current.selected = selected;
   }, [selected]);
 
-  const o = snap.office;
+  const o = snap.office!;
   const staff = [o.coordinator, ...o.employees].filter(Boolean) as Employee[];
   const working = staff.filter((e) => e.status === 'working').length;
   const sleeping = staff.filter((e) => e.status === 'sleeping').length;
@@ -97,11 +128,11 @@ function OfficeStage({ snap, selected, onPick }: { snap: AppSnapshot; selected?:
   return (
     <div className="stage frame">
       <div className="stage-bar">
-        <span className="stage-title">CODE OFFICE</span>
+        <span className="stage-title">{title}</span>
         <span className="stage-stats">
-          <span title="Nhân sự">👥 {o.employees.length}/6</span>
-          {working > 0 && <span className="working" title="Đang làm việc">⌨️ {working} đang làm</span>}
-          {sleeping > 0 && <span className="sleeping" title="Chờ hạn mức">😴 {sleeping} đang nghỉ</span>}
+          <span title={t('Employees')}>👥 {o.employees.length}/6</span>
+          {working > 0 && <span className="working">⌨️ {t('{n} working', { n: working })}</span>}
+          {sleeping > 0 && <span className="sleeping">😴 {t('{n} napping', { n: sleeping })}</span>}
         </span>
       </div>
       <div className="stage-canvas" ref={wrap}>
@@ -127,15 +158,19 @@ function OfficeStage({ snap, selected, onPick }: { snap: AppSnapshot; selected?:
         />
         {hoverEmp && hover && (
           <div className="tip" style={{ left: hover.x, top: hover.y }}>
-            <b>{hoverEmp.name}</b> · {hoverEmp.title}
-            <small>{snap.busy[hoverEmp.id] ?? hoverEmp.statusText ?? STATUS_TEXT[hoverEmp.status]}</small>
-            <small className="muted">{hoverEmp.model} · bấm để mở hồ sơ</small>
+            <b>
+              {hoverEmp.name} · {hoverEmp.title}
+            </b>
+            <small>{snap.busy[hoverEmp.id] ?? hoverEmp.statusText ?? t(EMP_STATUS[hoverEmp.status])}</small>
+            <small className="muted">
+              {hoverEmp.model} · {t('click to open the profile')}
+            </small>
           </div>
         )}
         {!o.coordinator && (
           <div className="stage-empty">
-            <b>Văn phòng đang trống</b>
-            <span>Chọn Trưởng phòng ở bảng bên phải để bắt đầu →</span>
+            <b>{t('The office is empty')}</b>
+            <span>{t('Choose a lead on the right to get started →')}</span>
           </div>
         )}
       </div>
@@ -143,19 +178,10 @@ function OfficeStage({ snap, selected, onPick }: { snap: AppSnapshot; selected?:
   );
 }
 
-const STATUS_TEXT: Record<Employee['status'], string> = {
-  'walking-in': 'Đang vào văn phòng',
-  idle: 'Đang rảnh',
-  working: 'Đang làm việc',
-  sleeping: 'Nghỉ chờ hạn mức',
-  blocked: 'Bị chặn',
-  meeting: 'Đang họp',
-};
-
 // ---------- staff dock ----------
 
 function StaffDock({ snap, selected, onPick }: { snap: AppSnapshot; selected?: string; onPick: (id: string) => void }) {
-  const o = snap.office;
+  const o = snap.office!;
   const accounts = new Map(snap.accounts.map((a) => [a.id, a]));
   const slots = Array.from({ length: 6 }, (_, i) => o.employees.find((e) => e.desk === i));
   const canHire = o.phase === 'ready' && o.employees.length < 6;
@@ -175,20 +201,20 @@ function StaffDock({ snap, selected, onPick }: { snap: AppSnapshot; selected?: s
             {acc && <ProviderIcon provider={acc.provider} size={12} />}
             {e.model.replace(/\[.*\]$/, '')}
           </span>
-          <small className={`dock-status ${e.status}`}>{activity ?? e.statusText ?? STATUS_TEXT[e.status]}</small>
+          <small className={`dock-status ${e.status}`}>{activity ?? e.statusText ?? t(EMP_STATUS[e.status])}</small>
         </span>
       </button>
     );
   };
   return (
     <div className="dock">
-      {o.coordinator ? card(o.coordinator) : <div className="dock-card ghost lead">★ Trưởng phòng</div>}
+      {o.coordinator ? card(o.coordinator) : <div className="dock-card ghost lead">★ {t('Lead')}</div>}
       {slots.map((e, i) =>
         e ? (
           card(e)
         ) : (
-          <button key={`slot${i}`} className="dock-card ghost" disabled={!canHire} onClick={() => api('office/add-staff', {})} title={canHire ? 'Tuyển thêm nhân viên' : 'Bàn trống'}>
-            {canHire ? '＋ Tuyển' : 'Bàn trống'}
+          <button key={`slot${i}`} className="dock-card ghost" disabled={!canHire} onClick={() => api('office/add-staff', {})} title={canHire ? t('Hire another employee') : t('Empty desk')}>
+            {canHire ? `＋ ${t('Hire')}` : t('Empty desk')}
           </button>
         ),
       )}
@@ -206,38 +232,55 @@ interface Toast {
   text: string;
 }
 
-function toastFor(l: LogEntry): Omit<Toast, 'id'> | undefined {
-  const t = l.text;
-  if (l.kind === 'error') return { tone: 'red', icon: '⚠', title: l.who, text: t };
-  if (t.startsWith('📣')) return { tone: 'gold', icon: '📣', title: 'Báo cáo từ Trưởng phòng', text: t.replace(/^📣\s*Báo cáo:\s*/, '').replace(/\*\*/g, '') };
-  if (t.startsWith('😴')) return { tone: 'blue', icon: '😴', title: `${l.who} đang nghỉ`, text: t.slice(2) };
-  if (t.startsWith('🔄')) return { tone: 'blue', icon: '🔄', title: `${l.who} đổi tài khoản`, text: t.slice(2) };
-  if (t.startsWith('🔀')) return { tone: 'green', icon: '🔀', title: 'Đã gộp code', text: t.slice(2) };
-  if (t.startsWith('⚔️')) return { tone: 'red', icon: '⚔️', title: 'Xung đột code', text: t.slice(2) };
-  if (t.startsWith('✅')) return { tone: 'green', icon: '✅', title: `${l.who} xong việc`, text: t.slice(2) };
-  return undefined;
+function toastFor(l: LogEntry, name: (id: string) => string): Omit<Toast, 'id'> | undefined {
+  const strip = (s: string) => s.replace(/^\S+\s/, '').replace(/\*\*/g, '');
+  if (l.kind === 'error') return { tone: 'red', icon: '⚠', title: name(l.who), text: l.text };
+  switch (l.tag) {
+    case 'report':
+      return { tone: 'gold', icon: '📣', title: t('Report from the lead'), text: l.text.replace(/\*\*/g, '') };
+    case 'sleep':
+      return { tone: 'blue', icon: '😴', title: t('{name} is napping', { name: name(l.who) }), text: strip(l.text) };
+    case 'failover':
+      return { tone: 'blue', icon: '🔄', title: t('{name} switched accounts', { name: name(l.who) }), text: strip(l.text) };
+    case 'merge':
+      return { tone: 'green', icon: '🔀', title: t('Code merged'), text: strip(l.text) };
+    case 'conflict':
+      return { tone: 'red', icon: '⚔️', title: t('Merge conflict'), text: strip(l.text) };
+    case 'done':
+      return { tone: 'green', icon: '✅', title: t('{name} finished a task', { name: name(l.who) }), text: strip(l.text) };
+    default:
+      return undefined;
+  }
 }
 
-function Toasts({ log }: { log: LogEntry[] }) {
+function Toasts({ officeId, log, staff }: { officeId: string; log: LogEntry[]; staff: Employee[] }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seen = useRef(Date.now());
+  useEffect(() => {
+    seen.current = Date.now();
+    setToasts([]);
+  }, [officeId]);
   useEffect(() => {
     const fresh = log.filter((l) => l.at > seen.current);
     if (!fresh.length) return;
     seen.current = fresh[fresh.length - 1].at;
-    const add = fresh.map(toastFor).filter(Boolean).map((t, i) => ({ ...t!, id: Date.now() + i }));
+    const name = (id: string) => (id === 'system' ? t('System') : staff.find((e) => e.id === id)?.name ?? id);
+    const add = fresh
+      .map((l) => toastFor(l, name))
+      .filter(Boolean)
+      .map((x, i) => ({ ...x!, id: Date.now() + i }));
     if (!add.length) return;
     setToasts((cur) => [...cur, ...add].slice(-4));
-    for (const t of add) setTimeout(() => setToasts((cur) => cur.filter((x) => x.id !== t.id)), t.tone === 'gold' ? 9000 : 5500);
+    for (const x of add) setTimeout(() => setToasts((cur) => cur.filter((y) => y.id !== x.id)), x.tone === 'gold' ? 9000 : 5500);
   }, [log]);
   return (
     <div className="toasts" aria-live="polite">
-      {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.tone}`} onClick={() => setToasts((c) => c.filter((x) => x.id !== t.id))}>
-          <span className="toast-icon">{t.icon}</span>
+      {toasts.map((x) => (
+        <div key={x.id} className={`toast ${x.tone}`} onClick={() => setToasts((c) => c.filter((y) => y.id !== x.id))}>
+          <span className="toast-icon">{x.icon}</span>
           <div>
-            <b>{t.title}</b>
-            <p>{t.text.length > 140 ? t.text.slice(0, 140) + '…' : t.text}</p>
+            <b>{x.title}</b>
+            <p>{x.text.length > 140 ? x.text.slice(0, 140) + '…' : x.text}</p>
           </div>
         </div>
       ))}
@@ -248,23 +291,25 @@ function Toasts({ log }: { log: LogEntry[] }) {
 // ---------- permission ----------
 
 function PermissionDialog({ snap }: { snap: AppSnapshot }) {
-  const p = snap.office.pendingPermission!;
+  const p = snap.office!.pendingPermission!;
   const [caps, setCaps] = useState<Capability[]>(p.needs);
   return (
-    <Modal title="Trưởng phòng xin quyền" icon="🔐" onClose={() => {}}>
+    <Modal title={t('The lead asks for permission')} icon="🔐" onClose={() => {}}>
       <p className="perm-reason">{p.reason}</p>
       <div className="perm-list">
         {p.needs.map((c) => (
           <label key={c} className={`perm ${caps.includes(c) ? 'on' : ''} ${c === 'full_access' ? 'danger' : ''}`}>
             <input type="checkbox" checked={caps.includes(c)} onChange={(e) => setCaps(e.target.checked ? [...caps, c] : caps.filter((x) => x !== c))} />
-            {CAPABILITY_LABELS[c] ?? c}
+            {t(CAP_LABEL[c] ?? c)}
           </label>
         ))}
       </div>
-      <p className="muted small">Cấp một lần, văn phòng dùng cho mọi task sau của dự án. Thu hồi được ở tab Thiết lập.</p>
+      <p className="muted small">{t('Granted once, the office reuses it for every later task in this project. You can revoke it in Settings.')}</p>
       <div className="actions">
-        <button className="px-btn" onClick={() => api('permissions/deny', {})}>Từ chối task này</button>
-        <button className="px-btn primary" disabled={!caps.length} onClick={() => api('permissions/grant', { caps })}>Cấp quyền</button>
+        <button className="px-btn" onClick={() => api('permissions/deny', {})}>{t('Deny this task')}</button>
+        <button className="px-btn primary" disabled={!caps.length} onClick={() => api('permissions/grant', { caps })}>
+          {t('Grant')}
+        </button>
       </div>
     </Modal>
   );

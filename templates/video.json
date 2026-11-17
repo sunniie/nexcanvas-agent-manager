@@ -1,0 +1,90 @@
+{
+  "id": "video",
+  "icon": "🎬",
+  "locked": true,
+  "maxEmployees": 6,
+  "workflow": "Brief → Script → Storyboard → Produce (motion graphics / edit) → Captions & audio → Render → Review",
+  "guidance": "This is a short-video studio. Videos are produced with code and command-line tools available on this machine: HTML-to-video compositions (e.g. HyperFrames or Remotion if installed), ffmpeg for cutting, concatenating, resizing (9:16, 1:1, 16:9), subtitles and audio mixing, plus scripts, storyboards and captions as files. Check which tools exist before planning (ffmpeg -version, installed skills). Every task must name its output files (e.g. out/teaser-9x16.mp4, script.md). Source media must come from the project folder or from free-to-use libraries; never claim rights you cannot verify. Never publish or upload anything.",
+  "roles": [
+    {
+      "key": "scriptwriter",
+      "title": "Scriptwriter",
+      "duty": "Hook, script, narration and on-screen text tuned to the platform and duration."
+    },
+    {
+      "key": "storyboard",
+      "title": "Storyboard Artist",
+      "duty": "Shot list and scene-by-scene storyboard with timing, framing and transitions."
+    },
+    {
+      "key": "motion",
+      "title": "Motion Designer",
+      "duty": "Build animated scenes, titles and graphics as code (HTML/CSS/JS compositions) and render them."
+    },
+    {
+      "key": "editor",
+      "title": "Video Editor",
+      "duty": "Assemble, trim, resize and encode footage with ffmpeg; export platform-ready files."
+    },
+    {
+      "key": "audio",
+      "title": "Audio & Captions",
+      "duty": "Subtitles/captions (SRT/ASS), music bed and voice-over mixing, loudness."
+    },
+    {
+      "key": "qa",
+      "title": "Video QA",
+      "duty": "Check renders frame by frame: timing, legibility, safe zones, aspect ratio, audio levels."
+    }
+  ],
+  "i18n": {
+    "en": {
+      "name": "Short Video Studio",
+      "tagline": "Scripts, motion graphics and edits for short-form video",
+      "description": "A studio that turns a brief into finished short videos with code-based motion graphics, ffmpeg edits, captions and audio, rendered in your project folder.",
+      "can": [
+        "Scripts, hooks, storyboards and captions",
+        "Motion graphics, kinetic text and title cards rendered from code",
+        "Cut, resize (9:16 / 1:1 / 16:9), subtitle and mix with ffmpeg",
+        "Batch variants for different platforms"
+      ],
+      "cannot": [
+        "Film real-world footage or create actors",
+        "Guarantee rights to third-party music or clips",
+        "Publish or upload to social networks"
+      ]
+    },
+    "vi": {
+      "name": "Studio Video ngắn",
+      "tagline": "Kịch bản, motion graphics và dựng video ngắn",
+      "description": "Studio biến brief thành video ngắn hoàn chỉnh: motion graphics bằng code, dựng bằng ffmpeg, phụ đề và âm thanh, xuất file ngay trong thư mục dự án.",
+      "can": [
+        "Kịch bản, hook, storyboard và caption",
+        "Motion graphics, chữ động, title card render từ code",
+        "Cắt, đổi khung (9:16 / 1:1 / 16:9), phụ đề, trộn âm bằng ffmpeg",
+        "Xuất nhiều phiên bản cho từng nền tảng"
+      ],
+      "cannot": [
+        "Quay cảnh thật hay tạo diễn viên",
+        "Đảm bảo bản quyền nhạc/clip của bên thứ ba",
+        "Đăng hay tải lên mạng xã hội"
+      ]
+    },
+    "zh": {
+      "name": "短视频工作室",
+      "tagline": "短视频的脚本、动态图形与剪辑",
+      "description": "将创意简报变成成品短视频的工作室：用代码制作动态图形、用 ffmpeg 剪辑、添加字幕与音频，并在项目文件夹中渲染输出。",
+      "can": [
+        "脚本、开场钩子、分镜与文案",
+        "用代码渲染的动态图形、动态文字和标题卡",
+        "用 ffmpeg 剪切、调整画幅（9:16 / 1:1 / 16:9）、加字幕与混音",
+        "为不同平台批量导出版本"
+      ],
+      "cannot": [
+        "拍摄真实画面或创造演员",
+        "保证第三方音乐或素材的版权",
+        "发布或上传到社交平台"
+      ]
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "id": "other",
+  "icon": "🧩",
+  "locked": true,
+  "maxEmployees": 6,
+  "workflow": "Clarify the goal → Check feasibility → Plan → Produce deliverables as files → Review",
+  "guidance": "This is a general-purpose office whose team is shaped by the user's request. Typical work: research and reports, documents and presentations as files, data analysis with scripts (CSV/Excel/JSON), writing and editing, small automations. Everything is produced as files in the project folder. BEFORE proposing a team or tasks, check the request against the office limits below; if something is out of scope, say so plainly in the reply, propose the closest feasible alternative, and do not create tasks for the impossible part. Office limits: no actions in the physical world; no purchases, payments or bookings; no logging into the user's personal accounts; no sending e-mails, messages or public posts; no legal, medical or financial decisions on the user's behalf (information and drafts only); no continuous monitoring after the session ends.",
+  "roles": [
+    {
+      "key": "researcher",
+      "title": "Researcher",
+      "duty": "Find, verify and cite sources; summarize findings with confidence levels."
+    },
+    {
+      "key": "writer",
+      "title": "Writer / Editor",
+      "duty": "Draft and edit documents, reports, articles and presentation content."
+    },
+    {
+      "key": "analyst",
+      "title": "Data Analyst",
+      "duty": "Clean and analyze data with scripts; produce tables, charts and conclusions."
+    },
+    {
+      "key": "builder",
+      "title": "Automation Builder",
+      "duty": "Write small scripts and tools that automate the requested workflow."
+    },
+    {
+      "key": "designer",
+      "title": "Visual Designer",
+      "duty": "Layouts, diagrams, slides and visual assets as files."
+    },
+    {
+      "key": "reviewer",
+      "title": "Reviewer",
+      "duty": "Check deliverables for accuracy, completeness and clarity against the request."
+    }
+  ],
+  "i18n": {
+    "en": {
+      "name": "Other",
+      "tagline": "A flexible office shaped by your request",
+      "description": "Research, writing, data analysis, presentations and small automations. The lead first checks whether your request fits the office limits, then builds a team for it.",
+      "can": [
+        "Research reports with sources",
+        "Documents, slides and content as files",
+        "Data analysis and charts with scripts",
+        "Small automations and tools"
+      ],
+      "cannot": [
+        "Act in the physical world, buy, pay or book",
+        "Log into your personal accounts or send e-mails/posts",
+        "Make legal, medical or financial decisions for you",
+        "Keep monitoring after the session ends"
+      ]
+    },
+    "vi": {
+      "name": "Khác (Other)",
+      "tagline": "Văn phòng linh hoạt theo yêu cầu của bạn",
+      "description": "Nghiên cứu, viết lách, phân tích dữ liệu, thuyết trình và tự động hóa nhỏ. Trưởng phòng kiểm tra yêu cầu có nằm trong giới hạn của văn phòng không, rồi mới lập đội phù hợp.",
+      "can": [
+        "Báo cáo nghiên cứu có nguồn",
+        "Tài liệu, slide, nội dung dạng file",
+        "Phân tích dữ liệu và biểu đồ bằng script",
+        "Tự động hóa và công cụ nhỏ"
+      ],
+      "cannot": [
+        "Hành động ngoài đời thực, mua bán, thanh toán, đặt chỗ",
+        "Đăng nhập tài khoản cá nhân hay gửi email/đăng bài",
+        "Quyết định pháp lý, y tế, tài chính thay bạn",
+        "Theo dõi liên tục sau khi phiên làm việc kết thúc"
+      ]
+    },
+    "zh": {
+      "name": "其他",
+      "tagline": "按你的需求灵活组建的办公室",
+      "description": "调研、写作、数据分析、演示文稿和小型自动化。负责人会先确认你的需求是否在办公室的能力范围内，再为它组建团队。",
+      "can": [
+        "附带来源的调研报告",
+        "以文件形式交付的文档、幻灯片和内容",
+        "用脚本做数据分析和图表",
+        "小型自动化与工具"
+      ],
+      "cannot": [
+        "在现实世界中行动、购买、付款或预订",
+        "登录你的个人账号或发送邮件/发帖",
+        "代你做法律、医疗或财务决定",
+        "会话结束后持续监控"
+      ]
+    }
+  }
+}

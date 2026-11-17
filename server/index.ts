@@ -4,10 +4,11 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { AppSnapshot, PastSession, ServerEvent, SkillInfo } from '../shared/types.ts';
+import { LANGS, type AppSnapshot, type Lang, type PastSession, type ServerEvent, type SkillInfo } from '../shared/types.ts';
 import * as A from './accounts.ts';
 import * as O from './office.ts';
-import { EXPORT_PROMPT, digestSession, findPastSessions } from './context.ts';
+import { EXPORT_PROMPTS, digestSession, findPastSessions } from './context.ts';
+import { tr } from './i18n.ts';
 import { listDir, pickFolder } from './fsdialog.ts';
 import { scanSkills } from './skills.ts';
 import { binExists } from './paths.ts';
@@ -19,19 +20,30 @@ const WEB_DIST = fileURLToPath(new URL('../dist/web/', import.meta.url));
 let skills: SkillInfo[] = [];
 let skillsFor: string | undefined = 'init';
 function currentSkills() {
-  if (skillsFor !== O.state.projectDir) {
-    skills = scanSkills(O.state.projectDir);
-    skillsFor = O.state.projectDir;
+  const dir = O.activeState()?.projectDir;
+  if (skillsFor !== dir) {
+    skills = scanSkills(dir);
+    skillsFor = dir;
   }
   return skills;
 }
+const uiLang = (): Lang => O.activeState()?.language ?? O.getLanguage() ?? 'en';
 
 /** Screen-sharing mode: never send account names or e-mails to the UI. */
 const PRIVACY = /^(1|true|yes)$/i.test(process.env.NEXCANVAS_PRIVACY ?? '');
 
 function snapshot(): AppSnapshot {
-  const accounts = A.getAccounts().map((a) => (PRIVACY ? { ...a, email: undefined, displayName: a.loggedIn ? 'Đã đăng nhập' : undefined } : a));
-  return { office: O.state, accounts, models: A.listModels(), skills: currentSkills(), busy: O.busyMap() };
+  const accounts = A.getAccounts().map((a) => (PRIVACY ? { ...a, email: undefined, displayName: undefined } : a));
+  return {
+    language: O.getLanguage(),
+    office: O.activeState(),
+    offices: O.listOffices(),
+    templates: O.templateInfos(),
+    accounts,
+    models: A.listModels(),
+    skills: currentSkills(),
+    busy: O.busyMap(),
+  };
 }
 
 // ---------- websocket ----------
@@ -50,8 +62,8 @@ function pushSnapshot() {
   }, 120);
 }
 O.onChange(pushSnapshot);
-O.onBubble((employeeId, text) => {
-  send({ type: 'bubble', employeeId, text });
+O.onBubble((officeId, employeeId, text) => {
+  send({ type: 'bubble', officeId, employeeId, text });
   pushSnapshot();
 });
 
@@ -137,7 +149,7 @@ const routes: Record<string, Handler> = {
   },
   'POST /api/accounts/probe': async (b) => {
     const acc = A.getAccount(b.id);
-    if (!acc) throw new Error('Không có tài khoản');
+    if (!acc) throw new Error(tr(uiLang(), 'err.noAccount', { id: b.id }));
     if (acc.provider === 'claude') await A.probeClaude(acc);
     else await A.refreshAccounts();
     pushSnapshot();
@@ -145,25 +157,26 @@ const routes: Record<string, Handler> = {
   },
   'POST /api/accounts/login': (b) => {
     const acc = A.getAccount(b.id);
-    if (!acc) throw new Error('Không có tài khoản');
+    if (!acc) throw new Error(tr(uiLang(), 'err.noAccount', { id: b.id }));
     A.launchLogin(acc);
     return { ok: true };
   },
   'POST /api/accounts/remove': (b) => {
-    if (O.allStaff().some((e) => e.accountId === b.id)) throw new Error('Có nhân viên đang dùng tài khoản này');
+    if (O.accountInUse(b.id)) throw new Error(tr(uiLang(), 'err.accountInUse'));
     A.removeProfile(b.id);
     pushSnapshot();
     return { ok: true };
   },
 
   'POST /api/office/coordinator': (b) => O.chooseCoordinator(b),
-  'POST /api/fs/pick': async () => ({ path: await pickFolder() }),
-  'GET /api/fs/list': (_b, url) => listDir(url.searchParams.get('path') || process.cwd()),
+  'POST /api/fs/pick': async (b) => ({ path: await pickFolder(b.title) }),
+  'GET /api/fs/list': (_b, url) => listDir(url.searchParams.get('path') || undefined),
   'POST /api/office/folder': (b) => O.chooseFolder(b.path),
 
   'GET /api/context/sessions': () => {
-    if (!O.state.projectDir) return [];
-    pastSessionsCache = findPastSessions(O.state.projectDir);
+    const dir = O.activeState()?.projectDir;
+    if (!dir) return [];
+    pastSessionsCache = findPastSessions(dir);
     return pastSessionsCache;
   },
   'POST /api/context/import': (b) => {
@@ -177,16 +190,25 @@ const routes: Record<string, Handler> = {
     }
     return { chars: total };
   },
-  'POST /api/context/upload': (b) => O.addContextFile(String(b.name || 'tai-lieu'), String(b.content || '')),
+  'POST /api/context/upload': (b) => O.addContextFile(String(b.name || 'notes'), String(b.content || '')),
   'POST /api/context/remove': (b) => O.removeContextFile(b.name),
-  'GET /api/context/export-prompt': () => ({ prompt: EXPORT_PROMPT }),
+  'GET /api/context/export-prompt': () => ({ prompt: EXPORT_PROMPTS[uiLang()] }),
 
   'POST /api/office/analyze': (b) => O.startAnalysis(b.feedback),
   'POST /api/office/accept': () => O.acceptProposal(),
   'POST /api/office/add-staff': () => O.openStaffing(),
   'GET /api/office/staffing': () => O.suggestStaffing(),
   'POST /api/office/hire': (b) => O.hire(b.specs ?? []),
-  'POST /api/office/reset': () => O.resetOffice(),
+
+  'POST /api/lang': (b) => {
+    if (!LANGS.includes(b.language)) throw new Error('bad language');
+    O.setLanguage(b.language);
+  },
+  'POST /api/offices/create': (b) => ({ id: O.createOffice(b.type, b.name) }),
+  'POST /api/offices/open': (b) => O.openOffice(b.id),
+  'POST /api/offices/close': () => O.closeOffice(),
+  'POST /api/offices/rename': (b) => O.renameOffice(b.id, String(b.name ?? '')),
+  'POST /api/offices/delete': (b) => O.deleteOffice(b.id),
 
   'POST /api/employee/update': (b) => O.updateEmployee(b.id, b.patch ?? {}),
   'POST /api/employee/fire': (b) => O.fire(b.id),
@@ -228,7 +250,7 @@ server.on('upgrade', (req, socket, head) => {
 
 // ---------- boot ----------
 
-O.loadLast();
+O.loadAll();
 await A.refreshAccounts();
 O.startScheduler();
 // Accounts/usage are re-read periodically (cheap: local files + `auth status`).
@@ -236,7 +258,7 @@ setInterval(() => A.refreshAccounts().then(pushSnapshot).catch(() => {}), 90_000
 
 server.listen(PORT, HOST, () => {
   const url = `http://${HOST}:${PORT}`;
-  console.log(`\n  🏢 NexCanvas Office đang chạy tại ${url}\n`);
+  console.log(`\n  🏢 NexCanvas Agent Manager → ${url}\n`);
   if (process.argv.includes('--open')) {
     const opener = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
     spawn(opener[0] as string, opener[1] as string[], { detached: true, stdio: 'ignore' }).unref();

@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import type { Capability } from '../../shared/types.ts';
 import { accountEnv } from '../accounts.ts';
 import { resolveBin } from '../paths.ts';
+import { tr } from '../i18n.ts';
+import type { Lang } from '../../shared/types.ts';
 import { LIMIT_PATTERN, extractJson, parseResetHint, shortPath, type TurnRequest, type TurnResult } from './types.ts';
 
 const READ_TOOLS = ['Read', 'Glob', 'Grep', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)', 'Bash(ls:*)'];
@@ -55,28 +57,28 @@ function permissionArgs(req: TurnRequest): string[] {
   return ['--permission-mode', 'acceptEdits', '--allowedTools', ...tools];
 }
 
-function describeTool(name: string, input: any): string {
+function describeTool(lang: Lang, name: string, input: any): string {
   switch (name) {
     case 'Edit':
     case 'Write':
     case 'NotebookEdit':
-      return `✏️ ${name === 'Write' ? 'Tạo' : 'Sửa'} ${shortPath(input?.file_path ?? input?.notebook_path)}`;
+      return `✏️ ${tr(lang, name === 'Write' ? 'act.create' : 'act.edit', { f: shortPath(input?.file_path ?? input?.notebook_path) })}`;
     case 'Read':
-      return `📖 Đọc ${shortPath(input?.file_path)}`;
+      return `📖 ${tr(lang, 'act.read', { f: shortPath(input?.file_path) })}`;
     case 'Bash':
     case 'PowerShell':
       return `⌨️ ${String(input?.command ?? '').slice(0, 60)}`;
     case 'Grep':
     case 'Glob':
-      return `🔎 Tìm ${String(input?.pattern ?? '').slice(0, 40)}`;
+      return `🔎 ${tr(lang, 'act.search', { q: String(input?.pattern ?? '').slice(0, 40) })}`;
     case 'TodoWrite':
-      return '📝 Cập nhật checklist';
+      return `📝 ${tr(lang, 'act.todo')}`;
     case 'WebSearch':
     case 'WebFetch':
-      return '🌐 Tra cứu web';
+      return `🌐 ${tr(lang, 'act.web')}`;
     case 'Agent':
     case 'Task':
-      return '🤝 Gọi trợ lý phụ';
+      return `🤝 ${tr(lang, 'act.agent')}`;
     default:
       return `🔧 ${name}`;
   }
@@ -119,7 +121,7 @@ export function runClaude(req: TurnRequest): Promise<TurnResult> {
       if (ev.session_id) result.sessionId = ev.session_id;
       if (ev.type === 'assistant') {
         for (const block of ev.message?.content ?? []) {
-          if (block.type === 'tool_use') req.onActivity?.(describeTool(block.name, block.input));
+          if (block.type === 'tool_use') req.onActivity?.(describeTool(req.lang, block.name, block.input));
           else if (block.type === 'text' && block.text?.trim()) lastText = block.text.trim();
         }
         const u = ev.message?.usage;

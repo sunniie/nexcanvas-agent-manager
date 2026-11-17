@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { AppSnapshot, ServerEvent } from '../../shared/types';
+import { locale, t } from './i18n';
 
 export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api/${path}`, {
@@ -12,7 +13,7 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-type BubbleFn = (id: string, text: string) => void;
+type BubbleFn = (officeId: string, id: string, text: string) => void;
 const bubbleListeners = new Set<BubbleFn>();
 export function onBubble(fn: BubbleFn) {
   bubbleListeners.add(fn);
@@ -36,7 +37,7 @@ export function useSnapshot() {
       ws.onmessage = (m) => {
         const ev = JSON.parse(m.data) as ServerEvent;
         if (ev.type === 'snapshot') setSnap(ev.data);
-        else if (ev.type === 'bubble') bubbleListeners.forEach((f) => f(ev.employeeId, ev.text));
+        else if (ev.type === 'bubble') bubbleListeners.forEach((f) => f(ev.officeId, ev.employeeId, ev.text));
       };
     };
     connect();
@@ -58,13 +59,13 @@ export function fmtTokens(n: number) {
 export function fmtCountdown(at?: number) {
   if (!at) return '';
   const ms = at - Date.now();
-  if (ms <= 0) return 'đã reset';
+  if (ms <= 0) return t('reset now');
   const h = Math.floor(ms / 3600_000);
   const m = Math.floor((ms % 3600_000) / 60_000);
-  if (h >= 24) return `${Math.floor(h / 24)}n ${h % 24}g`;
-  return h ? `${h}g ${m}p` : `${m}p`;
+  if (h >= 24) return t('{d}d {h}h', { d: Math.floor(h / 24), h: h % 24 });
+  return h ? t('{h}h {m}m', { h, m }) : t('{m}m', { m });
 }
 
 export function fmtTime(at: number) {
-  return new Date(at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  return new Date(at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
 }
