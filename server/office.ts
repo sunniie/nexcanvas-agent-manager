@@ -6,7 +6,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  MAX_CHAT_IMAGES,
+  MAX_EVIDENCE,
+  MAX_IMAGE_BYTES,
   MAX_OFFICES,
+  type Evidence,
+  type ImageUpload,
   type Account,
   type Capability,
   type Employee,
@@ -286,9 +291,9 @@ function workdirFor(e: Employee): string {
   return G.ensureWorktree(s.projectDir!, e.id, e.branch);
 }
 
-function log(who: string, kind: LogEntry['kind'], text: string, tag?: LogTag) {
+function log(who: string, kind: LogEntry['kind'], text: string, tag?: LogTag, images?: string[]) {
   const s = S();
-  s.log.push({ at: Date.now(), who, kind, text, ...(tag ? { tag } : {}) });
+  s.log.push({ at: Date.now(), who, kind, text, ...(tag ? { tag } : {}), ...(images?.length ? { images } : {}) });
   if (s.log.length > 300) s.log.splice(0, s.log.length - 300);
 }
 
@@ -554,13 +559,98 @@ export function accountInUse(accountId: string) {
 
 // ---------- boss ↔ lead ----------
 
-export function sendToCoordinator(message: string) {
+const IMAGE_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+const ATTACHMENT_NAME = /^[\w.-]+\.(png|jpg|gif|webp)$/;
+
+type ImageDir = 'attachments' | 'evidence';
+const IMAGE_DIRS: ImageDir[] = ['attachments', 'evidence'];
+
+/** Decode uploaded images (data URLs) into .office/<sub> and return their file names. */
+function saveImages(uploads: ImageUpload[], sub: ImageDir = 'attachments', prefix?: string): string[] {
+  const s = S();
+  const dir = ensureDir(path.join(s.projectDir!, '.office', sub));
+  const stamp = prefix ?? new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  return uploads.map((u, i) => {
+    const m = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/s.exec(String(u.data ?? ''));
+    if (!m) throw err('err.badImage');
+    const bytes = Buffer.from(m[2], 'base64');
+    if (bytes.length > MAX_IMAGE_BYTES) throw err('err.imageTooBig', { mb: MAX_IMAGE_BYTES / 1024 / 1024 });
+    const name = `${stamp}-${Math.random().toString(36).slice(2, 6)}-${i + 1}.${IMAGE_EXT[m[1]]}`;
+    fs.writeFileSync(path.join(dir, name), bytes);
+    return name;
+  });
+}
+
+/** Absolute path of an office image (chat attachment or evidence), or undefined if the name is invalid / missing. */
+export function officeImageFile(officeId: string, sub: string, name: string): string | undefined {
+  const dir = offices.get(officeId)?.state.projectDir;
+  if (!dir || !IMAGE_DIRS.includes(sub as ImageDir) || !ATTACHMENT_NAME.test(name)) return undefined;
+  const file = path.join(dir, '.office', sub, name);
+  return fs.existsSync(file) ? file : undefined;
+}
+
+/** Job image paths ("attachments/x.png", "evidence/y.png") → absolute paths that exist. */
+const officePaths = (rel?: string[]) =>
+  (rel ?? [])
+    .filter((r) => /^(attachments|evidence)\/[\w.-]+$/.test(r))
+    .map((r) => path.join(S().projectDir!, '.office', r))
+    .filter((f) => fs.existsSync(f));
+
+/** The screenshot helper employees run for evidence (ships with the app). */
+const SHOT_TOOL = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'shot.mjs').split(path.sep).join('/');
+const EVIDENCE_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+
+/** Copy the screenshots an employee listed in its report into .office/evidence. Boss-added images are kept. */
+function collectEvidence(t: Task, e: Employee, report: TaskReport) {
+  const s = S();
+  const dir = ensureDir(path.join(s.projectDir!, '.office', 'evidence'));
+  const old = t.evidence ?? [];
+  for (const x of old.filter((x) => x.by === 'agent')) fs.rmSync(path.join(dir, x.file), { force: true });
+  const bases = [e.workdir, s.projectDir, path.join(s.projectDir!, '.office')].filter(Boolean) as string[];
+  const out: Evidence[] = [];
+  for (const ev of (Array.isArray(report.evidence) ? report.evidence : []).slice(0, 4)) {
+    const p = String(ev?.path ?? '').trim();
+    if (!p) continue;
+    const src = (path.isAbsolute(p) ? [p] : bases.map((b) => path.resolve(b, p))).find((f) => fs.existsSync(f) && fs.statSync(f).isFile());
+    const ext = src && path.extname(src).toLowerCase();
+    if (!src || !ext || !EVIDENCE_EXT.includes(ext) || fs.statSync(src).size > MAX_IMAGE_BYTES) continue;
+    const name = `${t.id}-${Date.now().toString(36)}-${out.length + 1}${ext === '.jpeg' ? '.jpg' : ext}`;
+    fs.copyFileSync(src, path.join(dir, name));
+    // The raw shot was saved straight into the evidence folder: keep only the renamed copy.
+    if (path.resolve(path.dirname(src)) === path.resolve(dir)) fs.rmSync(src, { force: true });
+    out.push({ file: name, caption: String(ev.caption ?? '').slice(0, 240), by: 'agent', at: Date.now() });
+  }
+  t.evidence = [...out, ...old.filter((x) => x.by === 'boss')];
+}
+
+export function addEvidence(taskId: string, upload: ImageUpload, caption = '') {
+  const t = S().tasks.find((x) => x.id === taskId);
+  if (!t) throw err('err.noTask', { id: taskId });
+  if ((t.evidence?.length ?? 0) >= MAX_EVIDENCE) throw err('err.tooManyImages', { n: MAX_EVIDENCE });
+  const [file] = saveImages([upload], 'evidence', `${t.id}-boss`);
+  t.evidence = [...(t.evidence ?? []), { file, caption: caption.slice(0, 240), by: 'boss', at: Date.now() }];
+  save();
+}
+
+export function removeEvidence(taskId: string, file: string) {
+  const t = S().tasks.find((x) => x.id === taskId);
+  if (!t?.evidence?.some((x) => x.file === file) || !ATTACHMENT_NAME.test(file)) return;
+  t.evidence = t.evidence.filter((x) => x.file !== file);
+  fs.rmSync(path.join(S().projectDir!, '.office', 'evidence', file), { force: true });
+  save();
+}
+
+export function sendToCoordinator(message: string, uploads: ImageUpload[] = []) {
   const s = S();
   if (!s.coordinator) throw err('err.noLead');
-  log('boss', 'user', message);
-  s.goal = message;
+  if (!message && !uploads.length) return;
+  if (uploads.length > MAX_CHAT_IMAGES) throw err('err.tooManyImages', { n: MAX_CHAT_IMAGES });
+  const images = uploads.length ? saveImages(uploads) : [];
+  log('boss', 'user', message, undefined, images);
+  s.goal = message || T('imageOnlyGoal');
   s.goalSummarized = false;
-  enqueue('plan', 'lead', P.planPrompt(message, s.employees, s.tasks));
+  const officeRel = (n: string) => `.office/attachments/${n}`;
+  enqueue('plan', 'lead', P.planPrompt(message, s.employees, s.tasks, images.map(officeRel)), undefined, images.map((n) => `attachments/${n}`));
   save();
 }
 
@@ -620,8 +710,8 @@ export function retryTask(taskId: string) {
 
 // ---------- jobs & scheduler ----------
 
-function enqueue(kind: JobKind, employeeId: string, prompt: string, taskId?: string) {
-  const job: Job = { id: `J${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, kind, employeeId, taskId, prompt, status: 'queued', attempts: 0, createdAt: Date.now() };
+function enqueue(kind: JobKind, employeeId: string, prompt: string, taskId?: string, images?: string[]) {
+  const job: Job = { id: `J${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, kind, employeeId, taskId, prompt, ...(images?.length ? { images } : {}), status: 'queued', attempts: 0, createdAt: Date.now() };
   S().jobs.push(job);
   later(tick);
   return job;
@@ -684,7 +774,15 @@ export function tick() {
         changed = true;
         continue;
       }
-      enqueue('execute', e.id, P.executePrompt(t), t.id);
+      // Reference images go with the first attempt only; revisions continue in a session that has already seen them.
+      const imgs = t.reviewNote ? undefined : t.images;
+      const officeAbs = path.join(s.projectDir!, '.office').split(path.sep).join('/');
+      const prompt = P.executePrompt(t, {
+        images: imgs?.map((n) => `${officeAbs}/attachments/${n}`),
+        evidenceDir: ensureDir(path.join(s.projectDir!, '.office', 'evidence')),
+        shotTool: SHOT_TOOL,
+      });
+      enqueue('execute', e.id, prompt, t.id, imgs?.map((n) => `attachments/${n}`));
       changed = true;
     }
 
@@ -844,6 +942,7 @@ async function runJob(job: Job, e: Employee, acc: Account) {
     effort: e.effort,
     sessionId: e.sessionId,
     prompt: parts.join('\n\n'),
+    images: officePaths(job.images),
     systemAppend: e.isCoordinator ? P.coordinatorCard(tpl(), s.language) : P.employeeCard(e, roleDuty(e.roleKey), officeAbs, s.language),
     schema: e.isCoordinator ? P.COORDINATOR_SCHEMA : P.REPORT_SCHEMA,
     granted: s.granted,
@@ -973,6 +1072,8 @@ function handleResult(job: Job, e: Employee, res: TurnResult) {
           needs: (t.needs ?? []) as Capability[],
           status: 'todo',
           revisions: 0,
+          ...(job.images?.length ? { images: job.images.map((r) => path.basename(r)) } : {}),
+          goal: s.goal,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         });
@@ -986,12 +1087,19 @@ function handleResult(job: Job, e: Employee, res: TurnResult) {
       const report: TaskReport = out?.summary ? out : { status: 'done', summary: res.text.slice(0, 600), files_changed: [], tests: '', blockers: '' };
       t.report = report;
       t.updatedAt = Date.now();
+      try {
+        collectEvidence(t, e, report);
+      } catch (x: any) {
+        log('system', 'error', `${t.id} evidence: ${x.message}`);
+      }
       if (s.projectDir) fs.writeFileSync(path.join(s.projectDir, '.office', 'reports', `${t.id}.json`), JSON.stringify(report, null, 2));
       log(e.id, 'speech', T('done', { id: t.id, summary: report.summary.slice(0, 220) }), 'done');
       t.status = 'review';
       const wt = e.workdir && e.workdir !== s.projectDir ? e.workdir : undefined;
       const diff = wt ? G.reviewDiff(wt) : { stat: s.projectDir ? G.sharedDiffStat(s.projectDir) : '', patch: '' };
-      enqueue('review', 'lead', P.reviewPrompt(t, report, diff.stat, diff.patch, wt), t.id);
+      // The lead looks at the evidence screenshots while reviewing (a few hundred to ~1.5k tokens each).
+      const shots = (t.evidence ?? []).filter((x) => x.by === 'agent').slice(0, 3).map((x) => `evidence/${x.file}`);
+      enqueue('review', 'lead', P.reviewPrompt(t, report, diff.stat, diff.patch, wt), t.id, shots);
       break;
     }
     case 'review': {
@@ -1003,6 +1111,7 @@ function handleResult(job: Job, e: Employee, res: TurnResult) {
         t.reviewNote = out?.feedback ?? undefined;
         if (!mergeTask(t)) return;
         t.status = 'done';
+        t.doneAt = Date.now();
         log(e.id, 'speech', T('approved', { id: t.id, fb: out?.feedback ? `: ${String(out.feedback).slice(0, 160)}` : '' }), 'approve');
       } else {
         t.revisions++;

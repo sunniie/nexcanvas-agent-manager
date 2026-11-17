@@ -36,6 +36,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "puppeteer-core": "^23.11.1",
     "tsx": "^4.23.15",
     "ws": "^8.23.0"
   },

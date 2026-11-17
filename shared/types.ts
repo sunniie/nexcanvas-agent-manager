@@ -93,10 +93,23 @@ export type TaskStatus =
 export interface TaskReport {
   status: 'done' | 'partial' | 'blocked';
   summary: string;
+  /** One or two plain sentences for the boss: what is different now. */
+  result?: string;
   files_changed: string[];
   tests: string;
   blockers: string;
+  /** Screenshots the employee saved as proof (paths as reported). */
+  evidence?: { path: string; caption: string }[];
 }
+
+/** A proof image pinned to a finished task (file name in .office/evidence). */
+export interface Evidence {
+  file: string;
+  caption: string;
+  by: 'agent' | 'boss';
+  at: number;
+}
+export const MAX_EVIDENCE = 6;
 
 export interface Task {
   id: string;
@@ -111,6 +124,13 @@ export interface Task {
   report?: TaskReport;
   reviewNote?: string;
   merge?: { status: 'merged' | 'conflict' | 'failed'; commit?: string; files?: string[]; note?: string };
+  /** Reference images from the boss (file names in .office/attachments), inherited from the request. */
+  images?: string[];
+  /** Proof images for the report board. */
+  evidence?: Evidence[];
+  /** The boss's request this task came from. */
+  goal?: string;
+  doneAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -136,6 +156,8 @@ export interface Job {
   employeeId: string;
   taskId?: string;
   prompt: string;
+  /** Images attached to this turn, as paths relative to the .office folder (e.g. "attachments/x.png"). */
+  images?: string[];
   status: JobStatus;
   resumeAt?: number;
   attempts: number;
@@ -175,7 +197,17 @@ export interface LogEntry {
   kind: 'info' | 'speech' | 'tool' | 'error' | 'user' | 'system';
   text: string;
   tag?: LogTag;
+  /** Images the boss attached (file names in .office/attachments). */
+  images?: string[];
 }
+
+/** An image pasted or dropped into the chat, sent as a data URL. */
+export interface ImageUpload {
+  name?: string;
+  data: string;
+}
+export const MAX_CHAT_IMAGES = 6;
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export interface Settings {
   /** Strip MCP servers / user settings from worker sessions to save context tokens. */

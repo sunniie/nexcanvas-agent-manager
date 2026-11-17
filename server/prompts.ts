@@ -112,13 +112,24 @@ export const COORDINATOR_SCHEMA = {
 export const REPORT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['status', 'summary', 'files_changed', 'tests', 'blockers'],
+  required: ['status', 'summary', 'result', 'files_changed', 'tests', 'blockers', 'evidence'],
   properties: {
     status: { type: 'string', enum: ['done', 'partial', 'blocked'] },
-    summary: { type: 'string' },
+    summary: { type: 'string', description: 'What you did, for the lead.' },
+    result: { type: 'string', description: 'One or two plain sentences for the boss: what is different now (no file lists).' },
     files_changed: { type: 'array', items: { type: 'string' } },
-    tests: { type: 'string' },
+    tests: { type: 'string', description: 'Command(s) run and their result.' },
     blockers: { type: 'string' },
+    evidence: {
+      type: 'array',
+      description: 'Screenshots you saved as proof ([] if none).',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['path', 'caption'],
+        properties: { path: { type: 'string' }, caption: { type: 'string', description: 'What the screenshot proves, ≤ 1 sentence.' } },
+      },
+    },
   },
 };
 
@@ -146,11 +157,14 @@ ${skillCatalog || '(no skills found)'}
 Return JSON: fill reply (1 sentence), summary, brief_markdown, team, risks; tasks/verdict/feedback = null.`;
 }
 
-export function planPrompt(message: string, employees: Employee[], tasks: Task[]) {
+export function planPrompt(message: string, employees: Employee[], tasks: Task[], images: string[] = []) {
   const staff = employees.map((e) => `- ${e.id}: ${e.name} — ${e.title}`).join('\n');
   const open = tasks.filter((t) => t.status !== 'done' && t.status !== 'failed');
-  return `Message from the boss: """${message}"""
-
+  const imgs = images.length
+    ? `\nThe boss attached ${images.length} image(s), shown to you with this message and saved at: ${images.join(', ')}. Every task you create from this message automatically gets these images too, so describe in each task what to take from them (layout, error text, etc.).\n`
+    : '';
+  return `Message from the boss: """${message || '(no text — see the attached images)'}"""
+${imgs}
 Current staff:
 ${staff || '(no employees yet — if work is needed, tell the boss to hire first)'}
 ${open.length ? `Open tasks: ${open.map((t) => `${t.id} ${t.title} [${t.status}]`).join('; ')}` : ''}
@@ -161,9 +175,13 @@ Return JSON: fill reply and tasks; other fields = null.`;
 }
 
 /** Resume / bootstrap prefixes are added at run time (see office.runJob) so they match the live session. */
-export function executePrompt(task: Task) {
+export function executePrompt(task: Task, opts: { images?: string[]; evidenceDir: string; shotTool: string }) {
   const parts = [`${task.id}: ${task.title}\nDescription: ${task.description}\nAcceptance criteria: ${task.acceptance}`];
+  if (opts.images?.length) parts.push(`Reference images from the boss are attached to this message (also saved at: ${opts.images.join(', ')}).`);
   if (task.reviewNote) parts.push(`The lead asked for changes: ${task.reviewNote}`);
+  parts.push(`Evidence for the report board: if the result is visible (a page, UI, chart, rendered file…), save 1-2 screenshots to ${opts.evidenceDir}/${task.id}-1.png (-2…) and list them in "evidence".
+Screenshot tool: node "${opts.shotTool}" <url | html file> <out.png> [--serve "<dev server command>"] [--full] [--width=1280 --height=800]
+(--serve starts the command, waits for the URL, shoots, then stops it.) If nothing is visible, evidence = [] and put the proof (command + result) in "tests".`);
   parts.push('When done, return the JSON report in the requested schema.');
   return parts.join('\n\n');
 }
@@ -178,9 +196,11 @@ export function reviewPrompt(task: Task, report: TaskReport, diffStat: string, p
   const where = worktree
     ? `The work is in the employee's own workspace: ${worktree.split('\\').join('/')} (read files there if needed).`
     : 'The work is directly in the project folder.';
+  const shots = report.evidence?.length ?? 0;
   return `Review ${task.id}: ${task.title}
 Acceptance: ${task.acceptance}
 Employee report: ${JSON.stringify(report)}
+${shots ? `The employee's evidence screenshot(s) are attached to this message: check that they really show the result.` : ''}
 ${where}
 git diff --stat:
 ${diffStat || '(no changes)'}

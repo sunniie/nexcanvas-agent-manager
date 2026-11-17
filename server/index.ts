@@ -93,7 +93,11 @@ function body(req: http.IncomingMessage): Promise<any> {
     req.on('data', (c: Buffer) => {
       chunks.push(c);
       size += c.length;
-      if (size > 20 * 1024 * 1024) reject(new Error('Payload quá lớn'));
+      // Six pasted screenshots of up to 8 MB each, base64-encoded (+33%), fit under 70 MB.
+      if (size > 70 * 1024 * 1024) {
+        reject(new Error('Payload too large'));
+        req.destroy();
+      }
     });
     req.on('end', () => {
       try {
@@ -112,6 +116,8 @@ function json(res: http.ServerResponse, code: number, data: unknown) {
 }
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json' };
+
+const IMAGE_MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
 
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://x');
@@ -214,19 +220,29 @@ const routes: Record<string, Handler> = {
   'POST /api/employee/fire': (b) => O.fire(b.id),
   'POST /api/employee/reset-session': (b) => O.resetSession(b.id),
 
-  'POST /api/chat': (b) => O.sendToCoordinator(String(b.message ?? '').trim()),
+  'POST /api/chat': (b) => O.sendToCoordinator(String(b.message ?? '').trim(), Array.isArray(b.images) ? b.images : []),
   'POST /api/permissions/grant': (b) => O.grant(b.caps ?? []),
   'POST /api/permissions/revoke': (b) => O.revoke(b.cap),
   'POST /api/permissions/deny': () => O.denyPending(),
   'POST /api/settings': (b) => O.updateSettings(b ?? {}),
   'POST /api/job/cancel': (b) => O.cancelJob(b.id),
   'POST /api/task/retry': (b) => O.retryTask(b.id),
+  'POST /api/task/evidence/add': (b) => O.addEvidence(String(b.id), b.image ?? {}, String(b.caption ?? '')),
+  'POST /api/task/evidence/remove': (b) => O.removeEvidence(String(b.id), String(b.file ?? '')),
 };
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res);
   if (!isTrusted(req)) return json(res, 403, { error: 'forbidden' });
+  if (req.method === 'GET' && url.pathname === '/api/attachment') {
+    // Chat and evidence images: only files inside an office's .office/{attachments,evidence}, by validated name.
+    const q = url.searchParams;
+    const file = O.officeImageFile(q.get('office') ?? '', q.get('dir') ?? 'attachments', q.get('name') ?? '');
+    if (!file) return json(res, 404, { error: 'not found' });
+    res.writeHead(200, { 'content-type': IMAGE_MIME[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'private, max-age=86400' });
+    return fs.createReadStream(file).pipe(res);
+  }
   const handler = routes[`${req.method} ${url.pathname}`];
   if (!handler) return json(res, 404, { error: 'not found' });
   try {

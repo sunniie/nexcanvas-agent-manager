@@ -12,6 +12,8 @@ export interface TurnRequest {
   /** Resume this session; omitted = start a new one. */
   sessionId?: string;
   prompt: string;
+  /** Absolute paths of images to attach to this prompt (the model sees them directly). */
+  images?: string[];
   /** Role card / standing instructions. Claude: appended system prompt. Codex: prefixed on the first turn. */
   systemAppend?: string;
   /** JSON schema for a structured final answer. */

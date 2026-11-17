@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Capability } from '../../shared/types.ts';
 import { accountEnv } from '../accounts.ts';
 import { resolveBin } from '../paths.ts';
@@ -84,6 +86,18 @@ function describeTool(lang: Lang, name: string, input: any): string {
   }
 }
 
+const IMAGE_MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+
+/** One stream-json user message: the prompt text followed by the images as base64 blocks. */
+function imageMessage(prompt: string, files: string[]): string {
+  const content: any[] = [{ type: 'text', text: prompt }];
+  for (const f of files) {
+    const media_type = IMAGE_MIME[path.extname(f).toLowerCase()] ?? 'image/png';
+    content.push({ type: 'image', source: { type: 'base64', media_type, data: fs.readFileSync(f).toString('base64') } });
+  }
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
+}
+
 const pct = (v: any) => (v == null ? undefined : Math.round(Number(v) <= 1 ? Number(v) * 100 : Number(v)));
 
 export function runClaude(req: TurnRequest): Promise<TurnResult> {
@@ -98,6 +112,9 @@ export function runClaude(req: TurnRequest): Promise<TurnResult> {
   args.push('--exclude-dynamic-system-prompt-sections');
   if (req.lean) args.push('--strict-mcp-config');
   args.push(...permissionArgs(req));
+  // Images ride in a stream-json user message so the model sees them directly (no Read tool call).
+  const images = (req.images ?? []).filter((f) => fs.existsSync(f));
+  if (images.length) args.push('--input-format', 'stream-json');
 
   return new Promise((resolve) => {
     const child = spawn(resolveBin('claude'), args, {
@@ -171,7 +188,7 @@ export function runClaude(req: TurnRequest): Promise<TurnResult> {
       resolve(result);
     });
 
-    child.stdin.write(req.prompt);
+    child.stdin.write(images.length ? imageMessage(req.prompt, images) : req.prompt);
     child.stdin.end();
   });
 }

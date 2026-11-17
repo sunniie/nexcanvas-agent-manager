@@ -46,7 +46,9 @@ function describeItem(lang: Lang, item: any): string | undefined {
 export function runCodex(req: TurnRequest): Promise<TurnResult> {
   const sandbox = sandboxFor(req);
   const needsNetwork = req.granted.some((c) => c === 'network' || c === 'git_push' || c === 'deploy' || c === 'install_deps');
-  const common = ['--json', '--skip-git-repo-check', '-m', req.model, '-c', `sandbox_mode="${sandbox}"`];
+  // `--image=<file>` (with "=") so the multi-value flag never swallows the trailing "-" (prompt from stdin).
+  const images = (req.images ?? []).filter((f) => fs.existsSync(f)).map((f) => `--image=${f}`);
+  const common = [...images, '--json', '--skip-git-repo-check', '-m', req.model, '-c', `sandbox_mode="${sandbox}"`];
   if (req.effort) common.push('-c', `model_reasoning_effort="${req.effort}"`);
   if (sandbox === 'workspace-write' && needsNetwork) common.push('-c', 'sandbox_workspace_write.network_access=true');
   if (sandbox === 'workspace-write' && req.extraDirs?.length) {

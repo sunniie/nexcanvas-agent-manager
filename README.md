@@ -77,6 +77,8 @@ The lobby holds up to six offices. Each one works in its own project folder with
 | Git worktrees | With two or more people in a git repo, each employee works in its own worktree on an `office/*` branch. Approved work is committed and merged into your current branch; conflicts go back to the right person with the file list |
 | Review | The lead gets the employee's diff inline (no extra tool calls), may run the test suite, and approves or requests a revision |
 | Grant once | Pushing, deploying, installing dependencies, or network access is requested once per project and then reused. Grants can be revoked at any time |
+| Image attachments | Paste a screenshot with Ctrl+V, drop image files, or attach them with 📎 (up to 6 per message). The lead sees them directly, and every task created from that message carries the same images to the employee who does it. Images are saved in `.office/attachments/` and downscaled in the browser to the size models actually use |
+| Report board | Every finished task is pinned to a board with its evidence screenshots and a one-line result, grouped by request. Employees capture the screenshots themselves with the bundled `tools/shot.mjs` (headless Edge/Chrome, can start and stop a dev server), the lead looks at them while reviewing, and you can add or remove images by hand. Export the board as one self-contained HTML file to share |
 | Context import | Finds your previous Claude Code and Codex sessions for the folder and condenses them locally (no model calls). You can also upload `.txt`/`.md` files or copy a handover prompt into an old chat |
 | Skills | Scans `SKILL.md` frontmatter from Claude and Codex (never the bodies). The lead assigns at most four relevant skills per role |
 | Folder picker | The native Explorer-style "Select folder" dialog (brought to the front even when the server runs hidden), plus an in-app folder browser that works everywhere |
@@ -134,6 +136,7 @@ server/
   skills.ts         SKILL.md frontmatter scan
   prompts.ts        role cards, the lead schema, per-job prompts (English, with an output-language rule)
   i18n.ts           server messages in en / vi / zh
+tools/shot.mjs        evidence screenshots for employees (headless Edge/Chrome, optional --serve)
 templates/*.json      office types: roles, workflow, guidance, localized descriptions
                       (code = available; video, other = locked)
 web/src/locales/      UI translations (vi, zh; English strings are the keys)

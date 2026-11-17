@@ -8,6 +8,7 @@ import { Setup } from './components/Setup';
 import { CAP_LABEL, Workspace } from './components/Workspace';
 import { EMP_STATUS, EmployeeDialog } from './components/EmployeeDialog';
 import { Lobby } from './components/Lobby';
+import { ReportBoard } from './components/ReportBoard';
 import { LanguagePicker, LanguageSwitch } from './components/LanguagePicker';
 import { Avatar, Modal, ProviderIcon } from './components/ui';
 
@@ -83,6 +84,8 @@ function OfficeStage({ snap, selected, onPick, title }: { snap: AppSnapshot; sel
   const lastLog = useRef(0);
   const officeId = snap.office!.id;
   const [hover, setHover] = useState<{ id: string; x: number; y: number }>();
+  const [view, setView] = useState<'office' | 'board'>('office');
+  useEffect(() => setView('office'), [officeId]);
 
   useEffect(() => {
     const e = new OfficeEngine(canvas.current!);
@@ -124,11 +127,23 @@ function OfficeStage({ snap, selected, onPick, title }: { snap: AppSnapshot; sel
   const working = staff.filter((e) => e.status === 'working').length;
   const sleeping = staff.filter((e) => e.status === 'sleeping').length;
   const hoverEmp = hover && staff.find((e) => e.id === hover.id);
+  const doneCount = o.tasks.filter((x) => x.status === 'done').length;
 
   return (
     <div className="stage frame">
       <div className="stage-bar">
         <span className="stage-title">{title}</span>
+        {o.phase === 'ready' && (
+          <span className="view-switch" role="tablist">
+            <button role="tab" aria-selected={view === 'office'} className={view === 'office' ? 'on' : ''} onClick={() => setView('office')}>
+              🏢 {t('Office')}
+            </button>
+            <button role="tab" aria-selected={view === 'board'} className={view === 'board' ? 'on' : ''} onClick={() => setView('board')}>
+              📌 {t('Report board')}
+              {doneCount > 0 && <span className="view-count">{doneCount}</span>}
+            </button>
+          </span>
+        )}
         <span className="stage-stats">
           <span title={t('Employees')}>👥 {o.employees.length}/6</span>
           {working > 0 && <span className="working">⌨️ {t('{n} working', { n: working })}</span>}
@@ -167,6 +182,7 @@ function OfficeStage({ snap, selected, onPick, title }: { snap: AppSnapshot; sel
             </small>
           </div>
         )}
+        {view === 'board' && o.phase === 'ready' && <ReportBoard snap={snap} />}
         {!o.coordinator && (
           <div className="stage-empty">
             <b>{t('The office is empty')}</b>

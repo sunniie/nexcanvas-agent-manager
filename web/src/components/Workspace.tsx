@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CAPABILITY_LABELS, type AppSnapshot, type Capability, type Employee, type Task } from '../../../shared/types';
+import { CAPABILITY_LABELS, MAX_CHAT_IMAGES, type AppSnapshot, type Capability, type Employee, type ImageUpload, type Task } from '../../../shared/types';
 import { api, fmtTime, fmtTokens } from '../api';
 import { t } from '../i18n';
+import { attachmentURL, imageFiles, toUpload } from '../images';
 import { Avatar, Pill, Rich, Toggle } from './ui';
 
 type Tab = 'chat' | 'tasks' | 'settings';
@@ -119,9 +120,20 @@ function Chat({ snap, onOpenEmployee }: { snap: AppSnapshot; onOpenEmployee: (id
           if (l.kind === 'user') {
             return (
               <div key={i} className="msg me">
-                <div className="bubble">
-                  <Rich text={l.text} />
-                </div>
+                {!!l.images?.length && (
+                  <div className="msg-images">
+                    {l.images.map((n) => (
+                      <a key={n} href={attachmentURL(o.id, n)} target="_blank" rel="noreferrer">
+                        <img src={attachmentURL(o.id, n)} alt={t('Attached image')} loading="lazy" />
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {l.text && (
+                  <div className="bubble">
+                    <Rich text={l.text} />
+                  </div>
+                )}
                 {!grouped && <time>{fmtTime(l.at)}</time>}
               </div>
             );
@@ -169,19 +181,43 @@ function Chat({ snap, onOpenEmployee }: { snap: AppSnapshot; onOpenEmployee: (id
   );
 }
 
+type Pending = ImageUpload & { preview: string; id: number };
+let pendingSeq = 0;
+
 function Composer({ snap }: { snap: AppSnapshot }) {
   const [msg, setMsg] = useState('');
+  const [imgs, setImgs] = useState<Pending[]>([]);
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const o = snap.office!;
   const leadBusy = !!snap.busy['lead'];
+
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setErr('');
+    const room = MAX_CHAT_IMAGES - imgs.length;
+    if (files.length > room) setErr(t('At most {n} images per message', { n: MAX_CHAT_IMAGES }));
+    const added: Pending[] = [];
+    for (const f of files.slice(0, Math.max(0, room))) {
+      try {
+        added.push({ ...(await toUpload(f)), id: ++pendingSeq });
+      } catch {
+        setErr(t('Could not read that image'));
+      }
+    }
+    setImgs((cur) => [...cur, ...added].slice(0, MAX_CHAT_IMAGES));
+  };
+
   const send = async (text = msg) => {
-    if (!text.trim()) return;
+    if (!text.trim() && !imgs.length) return;
     setErr('');
     setSending(true);
     try {
-      await api('chat', { message: text });
+      await api('chat', { message: text, images: imgs.map(({ name, data }) => ({ name, data })) });
       setMsg('');
+      setImgs([]);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -189,8 +225,23 @@ function Composer({ snap }: { snap: AppSnapshot }) {
     }
   };
   return (
-    <div className="composer">
-      {!msg && o.employees.length > 0 && (
+    <div
+      className={`composer ${dragging ? 'dragging' : ''}`}
+      onDragOver={(e) => {
+        if (![...e.dataTransfer.types].includes('Files')) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        void addFiles(imageFiles(e.dataTransfer));
+      }}
+    >
+      {!msg && !imgs.length && o.employees.length > 0 && (
         <div className="quick">
           {(QUICK[o.template] ?? QUICK.code).map((q) => (
             <button key={q.text} onClick={() => setMsg(t(q.text))}>
@@ -200,12 +251,51 @@ function Composer({ snap }: { snap: AppSnapshot }) {
         </div>
       )}
       {err && <p className="error">{err}</p>}
+      {imgs.length > 0 && (
+        <div className="attach-row">
+          {imgs.map((im) => (
+            <div key={im.id} className="attach-thumb">
+              <img src={im.preview} alt={im.name} />
+              <button onClick={() => setImgs((cur) => cur.filter((x) => x.id !== im.id))} aria-label={t('Remove image')} title={t('Remove image')}>
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="composer-box">
+        <button
+          className="attach"
+          onClick={() => fileInput.current?.click()}
+          disabled={imgs.length >= MAX_CHAT_IMAGES}
+          aria-label={t('Attach images')}
+          title={t('Attach images')}
+        >
+          📎
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          hidden
+          onChange={(e) => {
+            void addFiles([...(e.target.files ?? [])]);
+            e.target.value = '';
+          }}
+        />
         <textarea
           rows={2}
           value={msg}
           placeholder={t('Give work to the lead or ask a question…')}
           onChange={(e) => setMsg(e.target.value)}
+          onPaste={(e) => {
+            const files = imageFiles(e.clipboardData);
+            if (!files.length) return;
+            // A pasted screenshot becomes an attachment; text in the same clipboard is still pasted.
+            if (!e.clipboardData.getData('text/plain')) e.preventDefault();
+            void addFiles(files);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -213,12 +303,13 @@ function Composer({ snap }: { snap: AppSnapshot }) {
             }
           }}
         />
-        <button className="send" onClick={() => send()} disabled={!msg.trim() || sending} aria-label={t('Send')}>
+        <button className="send" onClick={() => send()} disabled={(!msg.trim() && !imgs.length) || sending} aria-label={t('Send')}>
           ▶
         </button>
       </div>
+      {dragging && <div className="drop-hint">{t('Drop images to attach')}</div>}
       <small className="composer-hint">
-        {t('Enter to send · Shift+Enter for a new line')}
+        {t('Enter to send · Shift+Enter for a new line · paste or drop screenshots')}
         {leadBusy ? ` · ${t('the lead is busy, your message will be queued')}` : ''}
       </small>
     </div>
