@@ -270,6 +270,10 @@ export interface PastSession {
   updatedAt: number;
   title: string;
   messages: number;
+  /** Set when the session was started in a parent folder (and worked on this one) or in a subfolder. */
+  origin?: 'parent' | 'child';
+  /** Name of that other folder, for display. */
+  originDir?: string;
 }
 
 export interface OfficeSummary {

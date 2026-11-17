@@ -245,7 +245,10 @@ function ContextStep({ snap }: { snap: AppSnapshot }) {
   const [exportPrompt, setExportPrompt] = useState('');
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState<'auto' | 'file' | 'prompt' | ''>('auto');
+  const [only, setOnly] = useState<Provider | ''>('');
   const { err, busy, wrap } = useErr();
+  const shown = (sessions ?? []).filter((s) => !only || s.provider === only);
+  const count = (p: Provider) => (sessions ?? []).filter((s) => s.provider === p).length;
 
   useEffect(() => {
     api<PastSession[]>('context/sessions').then(setSessions).catch(() => setSessions([]));
@@ -276,8 +279,18 @@ function ContextStep({ snap }: { snap: AppSnapshot }) {
               <p className="muted">{t('No Claude Code / Codex sessions were found for this folder.')}</p>
             ) : (
               <>
+                {count('claude') > 0 && count('codex') > 0 && (
+                  <div className="session-filter" role="tablist">
+                    {(['', 'claude', 'codex'] as const).map((p) => (
+                      <button key={p || 'all'} role="tab" aria-selected={only === p} className={only === p ? 'on' : ''} onClick={() => setOnly(p)}>
+                        {p ? <ProviderIcon provider={p} size={13} /> : null}
+                        {p === '' ? t('All') : p === 'claude' ? 'Claude' : 'Codex'} <small>{p ? count(p) : sessions.length}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="session-list">
-                  {sessions.slice(0, 12).map((s) => (
+                  {shown.slice(0, 40).map((s) => (
                     <label key={s.id} className={`session ${picked.has(s.id) ? 'on' : ''}`}>
                       <input
                         type="checkbox"
@@ -291,6 +304,14 @@ function ContextStep({ snap }: { snap: AppSnapshot }) {
                       />
                       <ProviderIcon provider={s.provider} size={16} />
                       <span className="grow ellipsis" title={s.title}>{s.title}</span>
+                      {s.origin && (
+                        <span
+                          className="session-origin"
+                          title={s.origin === 'parent' ? t('Started in the parent folder "{dir}" and worked on this folder', { dir: s.originDir ?? '' }) : t('Started in the subfolder "{dir}"', { dir: s.originDir ?? '' })}
+                        >
+                          {s.origin === 'parent' ? '↑' : '↓'} {s.originDir}
+                        </span>
+                      )}
                       <small className="muted">{new Date(s.updatedAt).toLocaleDateString(locale())}</small>
                     </label>
                   ))}

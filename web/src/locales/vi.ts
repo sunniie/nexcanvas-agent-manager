@@ -289,4 +289,7 @@ export const VI: Record<string, string> = {
   "Tests": "Kiểm thử",
   "Files changed": "File đã sửa",
   "Lead's review": "Nhận xét của Trưởng phòng",
+  "All": "Tất cả",
+  "Started in the parent folder \"{dir}\" and worked on this folder": "Mở ở thư mục cha \"{dir}\" và có làm việc với thư mục này",
+  "Started in the subfolder \"{dir}\"": "Mở ở thư mục con \"{dir}\"",
 };

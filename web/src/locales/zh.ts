@@ -289,4 +289,7 @@ export const ZH: Record<string, string> = {
   "Tests": "测试",
   "Files changed": "修改的文件",
   "Lead's review": "主管的评审",
+  "All": "全部",
+  "Started in the parent folder \"{dir}\" and worked on this folder": "在上级文件夹「{dir}」中启动，并处理过此文件夹",
+  "Started in the subfolder \"{dir}\"": "在子文件夹「{dir}」中启动",
 };

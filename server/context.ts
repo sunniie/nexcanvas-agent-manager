@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { PastSession } from '../shared/types.ts';
 import { getAccounts } from './accounts.ts';
@@ -66,12 +67,91 @@ function cleanUserText(t: string) {
   return t.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/<ide_[a-z_]+>[\s\S]*?<\/ide_[a-z_]+>/g, '').trim();
 }
 
+type Relation = 'same' | 'parent' | 'child';
+
+/** How a session's folder relates to the project folder (parents: at most 2 levels up, never home/drive root). */
+function relationOf(cwd: string, target: string): Relation | undefined {
+  const c = norm(cwd);
+  if (c === target) return 'same';
+  if (c.startsWith(target + path.sep)) return 'child';
+  if (!target.startsWith(c + path.sep)) return undefined;
+  if (c === norm(os.homedir()) || path.parse(c).root.toLowerCase().replace(/[\\/]+$/, '') === c) return undefined;
+  return path.relative(c, target).split(path.sep).length <= 2 ? 'parent' : undefined;
+}
+
+/**
+ * Does a session started in a parent folder really work on the project folder? Count mentions of the
+ * relative path (e.g. "new-vimic", not "new-vimic-ci") in the first 32 MB, stopping at `need` hits.
+ */
+function mentionsFolder(file: string, rel: string, need = 3, maxBytes = 32 * 1024 * 1024): boolean {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?<![\\w.-])${rel.split(/[\\/]/).map(esc).join('(?:/|\\\\{1,2})')}(?![\\w.-])`, 'gi');
+  let fd: number | undefined;
+  let hits = 0;
+  try {
+    fd = fs.openSync(file, 'r');
+    const chunk = Buffer.alloc(1024 * 1024);
+    for (let pos = 0; pos < maxBytes; ) {
+      const n = fs.readSync(fd, chunk, 0, chunk.length, pos);
+      if (n <= 0) break;
+      pos += n;
+      hits += chunk.subarray(0, n).toString('utf8').match(re)?.length ?? 0;
+      if (hits >= need) return true;
+    }
+  } catch {
+    /* unreadable */
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  return false;
+}
+
+/**
+ * Claude transcript lines carry the session's working directory. The first one can sit far into the
+ * file when the opening message holds pasted images, so scan in 1 MB chunks (up to 16 MB).
+ */
+function claudeCwd(file: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const chunk = Buffer.alloc(1024 * 1024);
+    let carry = '';
+    for (let pos = 0; pos < 16 * 1024 * 1024; ) {
+      const n = fs.readSync(fd, chunk, 0, chunk.length, pos);
+      if (n <= 0) break;
+      pos += n;
+      const text = carry + chunk.subarray(0, n).toString('utf8');
+      const m = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(text);
+      if (m) return JSON.parse(`"${m[1]}"`);
+      carry = text.slice(-1024); // a match may straddle two chunks
+    }
+  } catch {
+    /* unreadable */
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  return undefined;
+}
+
+/** Sessions that NexCanvas's own agents ran (lead/employee turns) are not the boss's conversations. */
+const OFFICE_SESSION =
+  /^(You are the LEAD \(coordinating agent\)|You are [^,\n]{1,40}, [^\n]{1,80}in an agent office run by a lead agent|The boss (just assigned you|commented on the staffing)|Message from the boss:|Review TASK-\d+|TASK-\d+: |All tasks for the request|Before starting: read|⚠️ (You were interrupted|Teammates' work)|Bạn là TRƯỞNG PHÒNG|Sếp (vừa giao cho bạn|góp ý về đề xuất)|Tin nhắn của sếp:|Mọi task cho yêu cầu)/;
+
 export function findPastSessions(projectDir: string): PastSession[] {
   const out: PastSession[] = [];
   const target = norm(projectDir);
+  /** same folder: always; subfolder: always; parent folder: only if it worked on this folder. */
+  const accept = (cwd: string | undefined, file: string): Pick<PastSession, 'origin' | 'originDir'> | undefined => {
+    const rel = cwd ? relationOf(cwd, target) : undefined;
+    if (!rel) return undefined;
+    if (rel === 'same') return {};
+    if (rel === 'parent' && !mentionsFolder(file, path.relative(norm(cwd!), target))) return undefined;
+    return { origin: rel, originDir: path.basename(path.resolve(cwd!)) };
+  };
 
   // Claude: every Claude profile (default + extra accounts) may have sessions for this folder.
   const claudeDirs = new Set([DEFAULT_CLAUDE_DIR, ...getAccounts().filter((a) => a.provider === 'claude' && a.configDir).map((a) => a.configDir)]);
+  const wanted = claudeProjectFolder(projectDir);
   for (const dir of claudeDirs) {
     const projects = path.join(dir, 'projects');
     let folders: string[] = [];
@@ -80,11 +160,20 @@ export function findPastSessions(projectDir: string): PastSession[] {
     } catch {
       continue;
     }
-    const wanted = claudeProjectFolder(projectDir);
-    for (const f of folders.filter((x) => x.toLowerCase() === wanted)) {
+    // Folder names are lossy ("-" for every non-alphanumeric): use them only to pick candidates,
+    // then read the real cwd from the transcript.
+    const candidates = folders.filter((x) => {
+      const n = x.toLowerCase();
+      return n === wanted || wanted.startsWith(`${n}-`) || n.startsWith(`${wanted}-`);
+    });
+    for (const f of candidates) {
       for (const file of fs.readdirSync(path.join(projects, f)).filter((x) => x.endsWith('.jsonl'))) {
         const full = path.join(projects, f, file);
         const stat = fs.statSync(full);
+        if (stat.size < 200) continue; // empty / aborted session
+        const cwd = f.toLowerCase() === wanted ? projectDir : claudeCwd(full);
+        const origin = accept(cwd, full);
+        if (!origin) continue;
         let title = '';
         let started = stat.birthtimeMs;
         let messages = 0;
@@ -108,7 +197,7 @@ export function findPastSessions(projectDir: string): PastSession[] {
           }
           return false;
         });
-        if (stat.size < 200) continue; // empty / aborted session
+        if (OFFICE_SESSION.test(title)) continue;
         out.push({
           provider: 'claude',
           id: file.replace('.jsonl', ''),
@@ -117,6 +206,7 @@ export function findPastSessions(projectDir: string): PastSession[] {
           updatedAt: stat.mtimeMs,
           title: title || '(Claude Code session)',
           messages: Math.max(messages, Math.round(stat.size / 4000)),
+          ...origin,
         });
       }
     }
@@ -150,8 +240,8 @@ export function findPastSessions(projectDir: string): PastSession[] {
         } catch {
           continue;
         }
-        const cwd = meta?.payload?.cwd;
-        if (!cwd || norm(cwd) !== target) continue;
+        const origin = accept(meta?.payload?.cwd, full);
+        if (!origin) continue;
         let title = '';
         for (const line of head.split('\n').slice(1)) {
           try {
@@ -160,7 +250,7 @@ export function findPastSessions(projectDir: string): PastSession[] {
             if (j.type === 'response_item' && p?.type === 'message' && p.role === 'user') {
               const t = textOf(p.content).trim();
               if (t && !NOISE.test(t)) {
-                title = t.slice(0, 90);
+                title = t.replace(/\s+/g, ' ').slice(0, 90);
                 break;
               }
             }
@@ -168,6 +258,7 @@ export function findPastSessions(projectDir: string): PastSession[] {
             /* partial */
           }
         }
+        if (OFFICE_SESSION.test(title)) continue;
         const stat = fs.statSync(full);
         out.push({
           provider: 'codex',
@@ -175,8 +266,9 @@ export function findPastSessions(projectDir: string): PastSession[] {
           file: full,
           startedAt: Date.parse(meta.payload.timestamp ?? meta.timestamp) || stat.birthtimeMs,
           updatedAt: stat.mtimeMs,
-          title: title || '(phiên Codex)',
+          title: title || '(Codex session)',
           messages: Math.round(stat.size / 4000),
+          ...origin,
         });
       }
     }
@@ -190,19 +282,16 @@ export function findPastSessions(projectDir: string): PastSession[] {
  * Typically shrinks a session by 90%+ before the coordinator ever reads it.
  */
 export function digestSession(s: PastSession, maxChars = 24000): string {
-  let raw = '';
-  try {
-    raw = fs.readFileSync(s.file, 'utf8');
-  } catch {
-    return '';
-  }
   const turns: { role: 'user' | 'agent'; text: string }[] = [];
-  for (const line of raw.split('\n')) {
+  // Line by line: sessions can be hundreds of MB (pasted images, long tool output).
+  eachLine(s.file, Number.MAX_SAFE_INTEGER, (line) => {
+    // Cheap pre-filter before JSON.parse: only messages matter.
+    if (!line.includes('"type":"user"') && !line.includes('"type":"assistant"') && !line.includes('"type":"message"')) return false;
     let j: any;
     try {
       j = JSON.parse(line);
     } catch {
-      continue;
+      return false;
     }
     let role: 'user' | 'agent' | undefined;
     let text = '';
@@ -219,12 +308,14 @@ export function digestSession(s: PastSession, maxChars = 24000): string {
       text = textOf(j.payload.content);
     }
     text = text.trim();
-    if (!role || !text || NOISE.test(text)) continue;
+    if (!role || !text || NOISE.test(text)) return false;
     const last = turns[turns.length - 1];
     // Consecutive agent messages: keep only the latest (the turn's conclusion).
     if (last && last.role === 'agent' && role === 'agent') last.text = text;
     else turns.push({ role, text });
-  }
+    return false;
+  });
+  if (!turns.length) return '';
   const lines = turns.map((t) => (t.role === 'user' ? `USER: ${t.text.slice(0, 1500)}` : `AGENT: ${t.text.slice(0, 900)}`));
   let body = lines.join('\n\n');
   if (body.length > maxChars) {
@@ -236,7 +327,6 @@ export function digestSession(s: PastSession, maxChars = 24000): string {
   return `# ${s.provider} session ${s.id} (${date})\nTopic: ${s.title}\n\n${body}\n`;
 }
 
-/** Prompt the user pastes into an old chat to export a handoff document manually. */
 /** Prompt the user pastes into an old chat to export a handoff document manually. */
 export const EXPORT_PROMPTS: Record<'en' | 'vi' | 'zh', string> = {
   en: `Write a HANDOFF DOCUMENT (plain text) for this entire conversation, so another AI can take over the project without reading the history. Include exactly these sections:
