@@ -1,0 +1,17 @@
+{
+  "id": "code",
+  "name": "Văn phòng Code",
+  "description": "Xây dựng, sửa lỗi và phát hành phần mềm.",
+  "maxEmployees": 6,
+  "workflow": "Lập kế hoạch → Phát triển → Review → Kiểm thử → Phát hành",
+  "roles": [
+    { "key": "dev", "title": "Developer", "duty": "Viết và sửa code theo task, giữ thay đổi nhỏ gọn, chạy test liên quan." },
+    { "key": "frontend", "title": "Frontend Dev", "duty": "Giao diện, component, state phía client, responsive." },
+    { "key": "backend", "title": "Backend Dev", "duty": "API, database, logic nghiệp vụ, hiệu năng phía server." },
+    { "key": "uiux", "title": "UI/UX Designer", "duty": "Thiết kế luồng, bố cục, design token, copy giao diện; hiện thực bằng CSS/markup khi cần." },
+    { "key": "tester", "title": "Tester / QA", "duty": "Viết và chạy test, tái hiện lỗi, báo cáo bằng chứng cụ thể." },
+    { "key": "reviewer", "title": "Code Reviewer", "duty": "Soát lỗi logic, bảo mật, chất lượng; đề xuất sửa cụ thể." },
+    { "key": "devops", "title": "DevOps", "duty": "Build, CI/CD, cấu hình môi trường, deploy." },
+    { "key": "docs", "title": "Technical Writer", "duty": "README, tài liệu API, hướng dẫn sử dụng." }
+  ]
+}
