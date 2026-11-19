@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   MAX_CHAT_IMAGES,
+  MAX_CHAT_VIDEOS,
   MAX_EVIDENCE,
   MAX_IMAGE_BYTES,
   MAX_OFFICES,
@@ -38,6 +39,7 @@ import type { TurnResult } from './runner/types.ts';
 import { scanSkills, skillCatalog } from './skills.ts';
 import * as G from './git.ts';
 import { DEFAULT_NAMES, LOCALE, UserError, tr } from './i18n.ts';
+import { VIDEO_EXT, analyzeVideo, hasFfmpeg } from './media.ts';
 
 // ---------- templates ----------
 
@@ -291,9 +293,9 @@ function workdirFor(e: Employee): string {
   return G.ensureWorktree(s.projectDir!, e.id, e.branch);
 }
 
-function log(who: string, kind: LogEntry['kind'], text: string, tag?: LogTag, images?: string[]) {
+function log(who: string, kind: LogEntry['kind'], text: string, tag?: LogTag, images?: string[], videos?: string[]) {
   const s = S();
-  s.log.push({ at: Date.now(), who, kind, text, ...(tag ? { tag } : {}), ...(images?.length ? { images } : {}) });
+  s.log.push({ at: Date.now(), who, kind, text, ...(tag ? { tag } : {}), ...(images?.length ? { images } : {}), ...(videos?.length ? { videos } : {}) });
   if (s.log.length > 300) s.log.splice(0, s.log.length - 300);
 }
 
@@ -560,7 +562,7 @@ export function accountInUse(accountId: string) {
 // ---------- boss ↔ lead ----------
 
 const IMAGE_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
-const ATTACHMENT_NAME = /^[\w.-]+\.(png|jpg|gif|webp)$/;
+const ATTACHMENT_NAME = /^[\w.-]+\.(png|jpg|gif|webp|mp4|mov|webm|m4v|mkv|md)$/;
 
 type ImageDir = 'attachments' | 'evidence';
 const IMAGE_DIRS: ImageDir[] = ['attachments', 'evidence'];
@@ -640,18 +642,55 @@ export function removeEvidence(taskId: string, file: string) {
   save();
 }
 
-export function sendToCoordinator(message: string, uploads: ImageUpload[] = []) {
+/** Where a raw upload (video) for the active office goes; the name is generated, only the extension is kept. */
+export function newUploadPath(original: string): { file: string; name: string } {
   const s = S();
+  if (!s.projectDir) throw err('err.noFolder');
+  const ext = path.extname(original).toLowerCase();
+  if (!VIDEO_EXT.includes(ext)) throw err('err.badVideo');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  const name = `${stamp}-${Math.random().toString(36).slice(2, 6)}-video${ext}`;
+  return { file: path.join(ensureDir(path.join(s.projectDir, '.office', 'attachments')), name), name };
+}
+
+export async function sendToCoordinator(message: string, uploads: ImageUpload[] = [], videoNames: string[] = []) {
+  const c = cx();
+  const s = c.state;
   if (!s.coordinator) throw err('err.noLead');
-  if (!message && !uploads.length) return;
+  if (!message && !uploads.length && !videoNames.length) return;
   if (uploads.length > MAX_CHAT_IMAGES) throw err('err.tooManyImages', { n: MAX_CHAT_IMAGES });
+  if (videoNames.length > MAX_CHAT_VIDEOS) throw err('err.tooManyVideos', { n: MAX_CHAT_VIDEOS });
+  const attDir = path.join(s.projectDir!, '.office', 'attachments');
+  const videos = videoNames.filter((n) => ATTACHMENT_NAME.test(n) && VIDEO_EXT.includes(path.extname(n).toLowerCase()) && fs.existsSync(path.join(attDir, n)));
   const images = uploads.length ? saveImages(uploads) : [];
-  log('boss', 'user', message, undefined, images);
-  s.goal = message || T('imageOnlyGoal');
-  s.goalSummarized = false;
-  const officeRel = (n: string) => `.office/attachments/${n}`;
-  enqueue('plan', 'lead', P.planPrompt(message, s.employees, s.tasks, images.map(officeRel)), undefined, images.map((n) => `attachments/${n}`));
-  save();
+
+  // Models cannot watch video: turn each one into facts + frames first (ffmpeg, ~10-30 s per short clip).
+  const analyses: { name: string; summary?: string; frames: string[]; error?: string }[] = [];
+  for (const v of videos) {
+    if (!hasFfmpeg()) {
+      analyses.push({ name: v, frames: [], error: 'ffmpeg is not installed on this machine' });
+      continue;
+    }
+    try {
+      const a = await analyzeVideo(path.join(attDir, v));
+      analyses.push({ name: v, summary: a.summary, frames: a.images });
+    } catch (x: any) {
+      analyses.push({ name: v, frames: [], error: x.message });
+    }
+  }
+
+  als.run(c, () => {
+    log('boss', 'user', message, undefined, images, videos);
+    s.goal = message || T(videos.length ? 'videoOnlyGoal' : 'imageOnlyGoal');
+    s.goalSummarized = false;
+    const abs = (n: string) => path.join(attDir, n).split(path.sep).join('/');
+    // What the lead looks at: the boss's own images, then each video's contact sheet + key frames (max 10 in total).
+    const seen = [...images, ...analyses.flatMap((a) => a.frames.slice(0, 5))].slice(0, 10);
+    const videoNotes = analyses.map((a) => ({ file: abs(a.name), summary: a.summary ? abs(a.summary) : undefined, error: a.error }));
+    const job = enqueue('plan', 'lead', P.planPrompt(message, s.employees, s.tasks, images.map(abs), videoNotes), undefined, seen.map((n) => `attachments/${n}`));
+    if (videos.length) job.videos = videos;
+    save();
+  });
 }
 
 export function grant(caps: Capability[], approvePending = true) {
@@ -779,6 +818,7 @@ export function tick() {
       const officeAbs = path.join(s.projectDir!, '.office').split(path.sep).join('/');
       const prompt = P.executePrompt(t, {
         images: imgs?.map((n) => `${officeAbs}/attachments/${n}`),
+        videos: t.reviewNote ? undefined : t.videos?.map((n) => ({ file: `${officeAbs}/attachments/${n}`, summary: `${officeAbs}/attachments/${n.replace(/\.[^.]+$/, '')}.video.md` })),
         evidenceDir: ensureDir(path.join(s.projectDir!, '.office', 'evidence')),
         shotTool: SHOT_TOOL,
       });
@@ -1073,6 +1113,7 @@ function handleResult(job: Job, e: Employee, res: TurnResult) {
           status: 'todo',
           revisions: 0,
           ...(job.images?.length ? { images: job.images.map((r) => path.basename(r)) } : {}),
+          ...(job.videos?.length ? { videos: job.videos } : {}),
           goal: s.goal,
           createdAt: Date.now(),
           updatedAt: Date.now(),

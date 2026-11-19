@@ -292,4 +292,13 @@ export const ZH: Record<string, string> = {
   "All": "全部",
   "Started in the parent folder \"{dir}\" and worked on this folder": "在上级文件夹「{dir}」中启动，并处理过此文件夹",
   "Started in the subfolder \"{dir}\"": "在子文件夹「{dir}」中启动",
+  "Publish content (YouTube, social media)": "发布内容（YouTube、社交媒体）",
+  "At most {n} videos per message": "每条消息最多 {n} 个视频",
+  "uploaded, the lead will receive key frames and an analysis": "已上传，主管会收到关键帧和分析",
+  "uploading {p}%": "上传中 {p}%",
+  "Remove video": "移除视频",
+  "Attach images or videos": "附加图片或视频",
+  "Drop images or videos to attach": "将图片或视频拖到这里以附加",
+  "analysing the video (frames, cuts, loudness)…": "正在分析视频（关键帧、剪辑点、响度）…",
+  "Enter to send · Shift+Enter for a new line · paste or drop screenshots or videos": "Enter 发送 · Shift+Enter 换行 · 可粘贴或拖入截图、视频",
 };

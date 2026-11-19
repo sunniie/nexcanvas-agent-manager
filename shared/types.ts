@@ -126,6 +126,8 @@ export interface Task {
   merge?: { status: 'merged' | 'conflict' | 'failed'; commit?: string; files?: string[]; note?: string };
   /** Reference images from the boss (file names in .office/attachments), inherited from the request. */
   images?: string[];
+  /** Reference videos from the boss (file names in .office/attachments), inherited from the request. */
+  videos?: string[];
   /** Proof images for the report board. */
   evidence?: Evidence[];
   /** The boss's request this task came from. */
@@ -135,7 +137,7 @@ export interface Task {
   updatedAt: number;
 }
 
-export type Capability = 'git_commit' | 'git_push' | 'install_deps' | 'deploy' | 'network' | 'full_access';
+export type Capability = 'git_commit' | 'git_push' | 'install_deps' | 'deploy' | 'network' | 'publish' | 'full_access';
 
 export const CAPABILITY_LABELS: Record<Capability, string> = {
   git_commit: 'Commit git',
@@ -143,6 +145,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   install_deps: 'Cài thư viện (npm/pip...)',
   deploy: 'Deploy',
   network: 'Truy cập mạng',
+  publish: 'Đăng nội dung ra ngoài (YouTube, mạng xã hội)',
   full_access: 'Toàn quyền (bỏ sandbox)',
 };
 
@@ -158,6 +161,8 @@ export interface Job {
   prompt: string;
   /** Images attached to this turn, as paths relative to the .office folder (e.g. "attachments/x.png"). */
   images?: string[];
+  /** Videos attached to this turn (file names in .office/attachments). */
+  videos?: string[];
   status: JobStatus;
   resumeAt?: number;
   attempts: number;
@@ -199,6 +204,8 @@ export interface LogEntry {
   tag?: LogTag;
   /** Images the boss attached (file names in .office/attachments). */
   images?: string[];
+  /** Videos the boss attached (file names in .office/attachments). */
+  videos?: string[];
 }
 
 /** An image pasted or dropped into the chat, sent as a data URL. */
@@ -207,6 +214,8 @@ export interface ImageUpload {
   data: string;
 }
 export const MAX_CHAT_IMAGES = 6;
+export const MAX_CHAT_VIDEOS = 2;
+export const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v', 'video/x-matroska'];
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export interface Settings {

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { CAPABILITY_LABELS, MAX_CHAT_IMAGES, type AppSnapshot, type Capability, type Employee, type ImageUpload, type Task } from '../../../shared/types';
+import { CAPABILITY_LABELS, MAX_CHAT_IMAGES, MAX_CHAT_VIDEOS, type AppSnapshot, type Capability, type Employee, type ImageUpload, type Task } from '../../../shared/types';
 import { api, fmtTime, fmtTokens } from '../api';
 import { t } from '../i18n';
-import { attachmentURL, imageFiles, toUpload } from '../images';
+import { attachmentURL, imageFiles, toUpload, uploadVideo, videoFiles } from '../images';
 import { Avatar, Pill, Rich, Toggle } from './ui';
 
 type Tab = 'chat' | 'tasks' | 'settings';
@@ -23,6 +23,7 @@ export const CAP_LABEL: Record<Capability, string> = {
   install_deps: 'Install dependencies (npm/pip…)',
   deploy: 'Deploy',
   network: 'Network access',
+  publish: 'Publish content (YouTube, social media)',
   full_access: 'Full access (no sandbox)',
 };
 void CAPABILITY_LABELS;
@@ -129,6 +130,13 @@ function Chat({ snap, onOpenEmployee }: { snap: AppSnapshot; onOpenEmployee: (id
                     ))}
                   </div>
                 )}
+                {!!l.videos?.length && (
+                  <div className="msg-videos">
+                    {l.videos.map((n) => (
+                      <video key={n} src={attachmentURL(o.id, n)} controls preload="metadata" />
+                    ))}
+                  </div>
+                )}
                 {l.text && (
                   <div className="bubble">
                     <Rich text={l.text} />
@@ -182,11 +190,15 @@ function Chat({ snap, onOpenEmployee }: { snap: AppSnapshot; onOpenEmployee: (id
 }
 
 type Pending = ImageUpload & { preview: string; id: number };
+/** A video being streamed to the server (uploaded as soon as it is attached). */
+type PendingVideo = { id: number; label: string; bytes: number; progress: number; name?: string; error?: string; abort: () => void };
 let pendingSeq = 0;
+const fmtMB = (b: number) => `${(b / 1024 / 1024).toFixed(b > 100 * 1024 * 1024 ? 0 : 1)} MB`;
 
 function Composer({ snap }: { snap: AppSnapshot }) {
   const [msg, setMsg] = useState('');
   const [imgs, setImgs] = useState<Pending[]>([]);
+  const [vids, setVids] = useState<PendingVideo[]>([]);
   const [err, setErr] = useState('');
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -194,9 +206,25 @@ function Composer({ snap }: { snap: AppSnapshot }) {
   const o = snap.office!;
   const leadBusy = !!snap.busy['lead'];
 
-  const addFiles = async (files: File[]) => {
-    if (!files.length) return;
+  const addVideos = (files: File[]) => {
+    const room = MAX_CHAT_VIDEOS - vids.length;
+    if (files.length > room) setErr(t('At most {n} videos per message', { n: MAX_CHAT_VIDEOS }));
+    for (const f of files.slice(0, Math.max(0, room))) {
+      const id = ++pendingSeq;
+      const set = (patch: Partial<PendingVideo>) => setVids((cur) => cur.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+      const up = uploadVideo(f, (p) => set({ progress: p }));
+      setVids((cur) => [...cur, { id, label: f.name, bytes: f.size, progress: 0, abort: up.abort }]);
+      up.done.then((name) => set({ name, progress: 1 })).catch((e: Error) => set({ error: e.message }));
+    }
+  };
+
+  const addFiles = async (all: File[]) => {
+    if (!all.length) return;
     setErr('');
+    const videos = all.filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|mkv)$/i.test(f.name));
+    if (videos.length) addVideos(videos);
+    const files = all.filter((f) => !videos.includes(f) && f.type.startsWith('image/'));
+    if (!files.length) return;
     const room = MAX_CHAT_IMAGES - imgs.length;
     if (files.length > room) setErr(t('At most {n} images per message', { n: MAX_CHAT_IMAGES }));
     const added: Pending[] = [];
@@ -210,14 +238,17 @@ function Composer({ snap }: { snap: AppSnapshot }) {
     setImgs((cur) => [...cur, ...added].slice(0, MAX_CHAT_IMAGES));
   };
 
+  const uploading = vids.some((v) => !v.name && !v.error);
+  const readyVideos = vids.filter((v) => v.name).map((v) => v.name!);
   const send = async (text = msg) => {
-    if (!text.trim() && !imgs.length) return;
+    if ((!text.trim() && !imgs.length && !readyVideos.length) || uploading) return;
     setErr('');
     setSending(true);
     try {
-      await api('chat', { message: text, images: imgs.map(({ name, data }) => ({ name, data })) });
+      await api('chat', { message: text, images: imgs.map(({ name, data }) => ({ name, data })), videos: readyVideos });
       setMsg('');
       setImgs([]);
+      setVids([]);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -238,10 +269,10 @@ function Composer({ snap }: { snap: AppSnapshot }) {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        void addFiles(imageFiles(e.dataTransfer));
+        void addFiles([...imageFiles(e.dataTransfer), ...videoFiles(e.dataTransfer)]);
       }}
     >
-      {!msg && !imgs.length && o.employees.length > 0 && (
+      {!msg && !imgs.length && !vids.length && o.employees.length > 0 && (
         <div className="quick">
           {(QUICK[o.template] ?? QUICK.code).map((q) => (
             <button key={q.text} onClick={() => setMsg(t(q.text))}>
@@ -263,20 +294,50 @@ function Composer({ snap }: { snap: AppSnapshot }) {
           ))}
         </div>
       )}
+      {vids.length > 0 && (
+        <div className="attach-videos">
+          {vids.map((v) => (
+            <div key={v.id} className={`attach-video ${v.error ? 'bad' : v.name ? 'ok' : ''}`}>
+              <span className="attach-video-icon">🎬</span>
+              <span className="attach-video-text">
+                <b title={v.label}>{v.label}</b>
+                <small>
+                  {fmtMB(v.bytes)} · {v.error ? v.error : v.name ? t('uploaded, the lead will receive key frames and an analysis') : t('uploading {p}%', { p: Math.round(v.progress * 100) })}
+                </small>
+                {!v.name && !v.error && (
+                  <i className="attach-video-bar">
+                    <i style={{ width: `${Math.round(v.progress * 100)}%` }} />
+                  </i>
+                )}
+              </span>
+              <button
+                onClick={() => {
+                  v.abort();
+                  setVids((cur) => cur.filter((x) => x.id !== v.id));
+                }}
+                aria-label={t('Remove video')}
+                title={t('Remove video')}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="composer-box">
         <button
           className="attach"
           onClick={() => fileInput.current?.click()}
-          disabled={imgs.length >= MAX_CHAT_IMAGES}
-          aria-label={t('Attach images')}
-          title={t('Attach images')}
+          disabled={imgs.length >= MAX_CHAT_IMAGES && vids.length >= MAX_CHAT_VIDEOS}
+          aria-label={t('Attach images or videos')}
+          title={t('Attach images or videos')}
         >
           📎
         </button>
         <input
           ref={fileInput}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/webm,video/x-m4v,video/x-matroska,.mkv"
           multiple
           hidden
           onChange={(e) => {
@@ -290,7 +351,7 @@ function Composer({ snap }: { snap: AppSnapshot }) {
           placeholder={t('Give work to the lead or ask a question…')}
           onChange={(e) => setMsg(e.target.value)}
           onPaste={(e) => {
-            const files = imageFiles(e.clipboardData);
+            const files = [...imageFiles(e.clipboardData), ...videoFiles(e.clipboardData)];
             if (!files.length) return;
             // A pasted screenshot becomes an attachment; text in the same clipboard is still pasted.
             if (!e.clipboardData.getData('text/plain')) e.preventDefault();
@@ -303,13 +364,14 @@ function Composer({ snap }: { snap: AppSnapshot }) {
             }
           }}
         />
-        <button className="send" onClick={() => send()} disabled={(!msg.trim() && !imgs.length) || sending} aria-label={t('Send')}>
-          ▶
+        <button className="send" onClick={() => send()} disabled={(!msg.trim() && !imgs.length && !readyVideos.length) || sending || uploading} aria-label={t('Send')}>
+          {sending ? '…' : '▶'}
         </button>
       </div>
-      {dragging && <div className="drop-hint">{t('Drop images to attach')}</div>}
+      {dragging && <div className="drop-hint">{t('Drop images or videos to attach')}</div>}
       <small className="composer-hint">
-        {t('Enter to send · Shift+Enter for a new line · paste or drop screenshots')}
+        {t('Enter to send · Shift+Enter for a new line · paste or drop screenshots or videos')}
+        {sending && readyVideos.length ? ` · ${t('analysing the video (frames, cuts, loudness)…')}` : ''}
         {leadBusy ? ` · ${t('the lead is busy, your message will be queued')}` : ''}
       </small>
     </div>

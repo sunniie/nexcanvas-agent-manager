@@ -18,7 +18,7 @@ export const LANG_NAME: Record<Lang, string> = { en: 'English', vi: 'Vietnamese 
 const langRule = (lang: Lang) =>
   `LANGUAGE: write every user-facing text (reply, summary, BRIEF, role titles, reasons, task titles/descriptions, reports, notes) in ${LANG_NAME[lang]}. Code, identifiers and file names stay as they are.`;
 
-const CAPS = 'git_commit | git_push | install_deps | deploy | network | full_access';
+const CAPS = 'git_commit | git_push | install_deps | deploy | network | publish | full_access';
 
 // ---------- system cards (sent once per session, then cached by the provider) ----------
 
@@ -33,7 +33,7 @@ Rules:
 - You do NOT edit project files yourself; you read to understand and delegate to employees.
 - Save tokens: read only the files you need, never the whole project; write tasks clear enough that employees never need to ask back.
 - A good task = clear file scope, measurable acceptance criteria, as independent as possible so it can run in parallel.
-- Sensitive operations (git push, deploy, installing dependencies, network) must be declared in "needs" so the boss can grant them once.
+- Sensitive operations (git push, deploy, installing dependencies, network, publishing/uploading content to YouTube or social media = "publish") must be declared in "needs" so the boss can grant them once.
 - The office-wide brief lives in .office/BRIEF.md.`;
 }
 
@@ -49,6 +49,7 @@ Working rules:
 - Stay within the task scope; if you must touch files outside it, say so in the report.
 - After each task, append ≤10 lines to ${office}/agents/${e.id}.md: what you did, key decisions, unfinished work. This is your handover notebook.
 - Do not commit/push/deploy (the office commits and merges approved work) unless the task explicitly asks.
+- Never upload or publish anything to YouTube, social media or other public platforms unless the task explicitly asks for it (it needs the "publish" permission).
 - Finish every task with the JSON report in the requested schema.`;
 }
 
@@ -157,14 +158,17 @@ ${skillCatalog || '(no skills found)'}
 Return JSON: fill reply (1 sentence), summary, brief_markdown, team, risks; tasks/verdict/feedback = null.`;
 }
 
-export function planPrompt(message: string, employees: Employee[], tasks: Task[], images: string[] = []) {
+export function planPrompt(message: string, employees: Employee[], tasks: Task[], images: string[] = [], videos: { file: string; summary?: string; error?: string }[] = []) {
   const staff = employees.map((e) => `- ${e.id}: ${e.name} — ${e.title}`).join('\n');
   const open = tasks.filter((t) => t.status !== 'done' && t.status !== 'failed');
   const imgs = images.length
     ? `\nThe boss attached ${images.length} image(s), shown to you with this message and saved at: ${images.join(', ')}. Every task you create from this message automatically gets these images too, so describe in each task what to take from them (layout, error text, etc.).\n`
     : '';
-  return `Message from the boss: """${message || '(no text — see the attached images)'}"""
-${imgs}
+  const vids = videos.length
+    ? `\nThe boss attached ${videos.length} video(s). You cannot watch video: ${videos.map((v) => (v.summary ? `${v.file} — read the analysis ${v.summary} (duration, format, pacing, loudness); its contact sheet and key frames are attached as images` : `${v.file} — automatic analysis failed (${v.error ?? 'unknown'}); inspect it with ffmpeg if needed`)).join('; ')}. Tasks created from this message automatically carry the video path and frames. If the boss wants a video "like this one", first pin down its style (format, pacing, layout, typography, colour, captions, audio) in a short style guide, and follow the project's own production pipeline if it has one (read its docs).\n`
+    : '';
+  return `Message from the boss: """${message || '(no text — see the attachments)'}"""
+${imgs}${vids}
 Current staff:
 ${staff || '(no employees yet — if work is needed, tell the boss to hire first)'}
 ${open.length ? `Open tasks: ${open.map((t) => `${t.id} ${t.title} [${t.status}]`).join('; ')}` : ''}
@@ -175,9 +179,10 @@ Return JSON: fill reply and tasks; other fields = null.`;
 }
 
 /** Resume / bootstrap prefixes are added at run time (see office.runJob) so they match the live session. */
-export function executePrompt(task: Task, opts: { images?: string[]; evidenceDir: string; shotTool: string }) {
+export function executePrompt(task: Task, opts: { images?: string[]; videos?: { file: string; summary: string }[]; evidenceDir: string; shotTool: string }) {
   const parts = [`${task.id}: ${task.title}\nDescription: ${task.description}\nAcceptance criteria: ${task.acceptance}`];
   if (opts.images?.length) parts.push(`Reference images from the boss are attached to this message (also saved at: ${opts.images.join(', ')}).`);
+  if (opts.videos?.length) parts.push(`Reference video(s) from the boss: ${opts.videos.map((v) => `${v.file} (analysis: ${v.summary})`).join('; ')}. You cannot watch video: use the analysis, the attached frames, and ffmpeg to sample more frames or cut clips.`);
   if (task.reviewNote) parts.push(`The lead asked for changes: ${task.reviewNote}`);
   parts.push(`Evidence for the report board: if the result is visible (a page, UI, chart, rendered file…), save 1-2 screenshots to ${opts.evidenceDir}/${task.id}-1.png (-2…) and list them in "evidence".
 Screenshot tool: node "${opts.shotTool}" <url | html file> <out.png> [--serve "<dev server command>"] [--full] [--width=1280 --height=800]

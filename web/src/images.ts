@@ -44,3 +44,33 @@ export function imageFiles(list: DataTransfer | null): File[] {
 
 export const attachmentURL = (officeId: string, name: string, dir: 'attachments' | 'evidence' = 'attachments') =>
   `/api/attachment?office=${encodeURIComponent(officeId)}&dir=${dir}&name=${encodeURIComponent(name)}`;
+
+/** Video files from a paste or drop event. */
+export function videoFiles(list: DataTransfer | null): File[] {
+  if (!list) return [];
+  return [...(list.files ?? [])].filter((f) => f.type.startsWith('video/') || /\.(mp4|mov|webm|m4v|mkv)$/i.test(f.name));
+}
+
+/** Stream a video to the server (raw body, no base64) with progress. Resolves to the stored file name. */
+export function uploadVideo(file: File, onProgress: (fraction: number) => void): { done: Promise<string>; abort: () => void } {
+  const xhr = new XMLHttpRequest();
+  const done = new Promise<string>((resolve, reject) => {
+    xhr.open('POST', `/api/upload?name=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader('content-type', 'application/octet-stream');
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      let j: any = {};
+      try {
+        j = JSON.parse(xhr.responseText);
+      } catch {
+        /* not json */
+      }
+      if (xhr.status === 200 && j.name) resolve(j.name);
+      else reject(new Error(j.error ?? `HTTP ${xhr.status}`));
+    };
+    xhr.onerror = () => reject(new Error('upload failed'));
+    xhr.onabort = () => reject(new Error('cancelled'));
+    xhr.send(file);
+  });
+  return { done, abort: () => xhr.abort() };
+}

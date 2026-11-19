@@ -12,6 +12,7 @@ import { tr } from './i18n.ts';
 import { listDir, pickFolder } from './fsdialog.ts';
 import { scanSkills } from './skills.ts';
 import { binExists } from './paths.ts';
+import { MAX_VIDEO_BYTES } from './media.ts';
 
 const PORT = Number(process.env.NEXCANVAS_PORT || 4317);
 const HOST = '127.0.0.1';
@@ -117,7 +118,18 @@ function json(res: http.ServerResponse, code: number, data: unknown) {
 
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json' };
 
-const IMAGE_MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+const IMAGE_MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+  '.md': 'text/markdown; charset=utf-8',
+};
 
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
   const url = new URL(req.url ?? '/', 'http://x');
@@ -220,7 +232,8 @@ const routes: Record<string, Handler> = {
   'POST /api/employee/fire': (b) => O.fire(b.id),
   'POST /api/employee/reset-session': (b) => O.resetSession(b.id),
 
-  'POST /api/chat': (b) => O.sendToCoordinator(String(b.message ?? '').trim(), Array.isArray(b.images) ? b.images : []),
+  'POST /api/chat': (b) =>
+    O.sendToCoordinator(String(b.message ?? '').trim(), Array.isArray(b.images) ? b.images : [], Array.isArray(b.videos) ? b.videos.map(String) : []),
   'POST /api/permissions/grant': (b) => O.grant(b.caps ?? []),
   'POST /api/permissions/revoke': (b) => O.revoke(b.cap),
   'POST /api/permissions/deny': () => O.denyPending(),
@@ -240,8 +253,50 @@ const server = http.createServer(async (req, res) => {
     const q = url.searchParams;
     const file = O.officeImageFile(q.get('office') ?? '', q.get('dir') ?? 'attachments', q.get('name') ?? '');
     if (!file) return json(res, 404, { error: 'not found' });
-    res.writeHead(200, { 'content-type': IMAGE_MIME[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'private, max-age=86400' });
+    const type = IMAGE_MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
+    const size = fs.statSync(file).size;
+    // Videos need byte ranges so the player can seek.
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+    if (range && (range[1] || range[2])) {
+      const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2]));
+      const end = range[1] && range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+      if (start >= size || start > end) {
+        res.writeHead(416, { 'content-range': `bytes */${size}` });
+        return res.end();
+      }
+      res.writeHead(206, { 'content-type': type, 'content-length': end - start + 1, 'content-range': `bytes ${start}-${end}/${size}`, 'accept-ranges': 'bytes', 'cache-control': 'private, max-age=86400' });
+      return fs.createReadStream(file, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { 'content-type': type, 'content-length': size, 'accept-ranges': 'bytes', 'cache-control': 'private, max-age=86400' });
     return fs.createReadStream(file).pipe(res);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/upload') {
+    // Raw streamed upload (videos can be hundreds of MB, too big for a JSON body).
+    let target: { file: string; name: string };
+    try {
+      target = O.newUploadPath(url.searchParams.get('name') ?? '');
+    } catch (e: any) {
+      req.resume();
+      return json(res, 400, { error: e.message });
+    }
+    let size = 0;
+    let tooBig = false;
+    const out = fs.createWriteStream(target.file);
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_VIDEO_BYTES && !tooBig) {
+        tooBig = true;
+        req.unpipe(out);
+        out.destroy();
+        fs.rm(target.file, { force: true }, () => {});
+        json(res, 413, { error: tr(uiLang(), 'err.videoTooBig', { mb: MAX_VIDEO_BYTES / 1024 / 1024 }) });
+        req.destroy();
+      }
+    });
+    req.pipe(out);
+    out.on('finish', () => !tooBig && json(res, 200, { name: target.name, bytes: size }));
+    out.on('error', (e) => !tooBig && json(res, 500, { error: e.message }));
+    return;
   }
   const handler = routes[`${req.method} ${url.pathname}`];
   if (!handler) return json(res, 404, { error: 'not found' });

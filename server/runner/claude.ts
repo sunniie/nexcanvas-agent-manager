@@ -47,6 +47,8 @@ const CAPABILITY_TOOLS: Record<Capability, string[]> = {
   install_deps: ['Bash(npm install:*)', 'Bash(npm i:*)', 'Bash(pnpm add:*)', 'Bash(pnpm install:*)', 'Bash(yarn add:*)', 'Bash(pip install:*)'],
   deploy: ['Bash(vercel:*)', 'Bash(netlify:*)', 'Bash(firebase deploy:*)', 'Bash(npm run deploy:*)', 'Bash(wrangler:*)'],
   network: ['WebFetch', 'WebSearch', 'Bash(curl:*)'],
+  // Upload commands are project scripts (already runnable via npm run / node); the grant is enforced by task needs.
+  publish: ['WebFetch'],
   full_access: [],
 };
 

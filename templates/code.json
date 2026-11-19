@@ -3,7 +3,7 @@
   "icon": "💻",
   "maxEmployees": 6,
   "workflow": "Plan → Implement → Review → Test → Ship",
-  "guidance": "This is a software office. Work happens in the project's source code. Prefer small, independently reviewable tasks with clear file scopes and runnable acceptance checks (tests, build, lint).",
+  "guidance": "This is a software office. Work happens in the project's source code. Prefer small, independently reviewable tasks with clear file scopes and runnable acceptance checks (tests, build, lint). If the project itself contains a media or content pipeline (for example video production scripts and docs such as a PRODUCTION.md or AGENTS.md section), tasks that follow that pipeline (videos, lesson content, thumbnails, uploads) are in scope: read the project docs first and reuse its tools. Reference videos from the boss arrive as an automatic analysis plus frames. Public websites can be read with web access (WebFetch/search, or screenshots via the evidence tool); pages behind a login cannot be reached.",
   "roles": [
     { "key": "dev", "title": "Developer", "duty": "Write and fix code for the task, keep changes small, run the related tests." },
     { "key": "frontend", "title": "Frontend Developer", "duty": "UI, components, client-side state, responsive layout." },

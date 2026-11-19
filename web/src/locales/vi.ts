@@ -292,4 +292,13 @@ export const VI: Record<string, string> = {
   "All": "Tất cả",
   "Started in the parent folder \"{dir}\" and worked on this folder": "Mở ở thư mục cha \"{dir}\" và có làm việc với thư mục này",
   "Started in the subfolder \"{dir}\"": "Mở ở thư mục con \"{dir}\"",
+  "Publish content (YouTube, social media)": "Đăng nội dung ra ngoài (YouTube, mạng xã hội)",
+  "At most {n} videos per message": "Tối đa {n} video mỗi tin nhắn",
+  "uploaded, the lead will receive key frames and an analysis": "đã tải lên — Trưởng phòng sẽ nhận khung hình chính và bản phân tích",
+  "uploading {p}%": "đang tải lên {p}%",
+  "Remove video": "Bỏ video",
+  "Attach images or videos": "Đính kèm ảnh hoặc video",
+  "Drop images or videos to attach": "Thả ảnh hoặc video vào đây để đính kèm",
+  "analysing the video (frames, cuts, loudness)…": "đang phân tích video (khung hình, cảnh cắt, âm lượng)…",
+  "Enter to send · Shift+Enter for a new line · paste or drop screenshots or videos": "Enter để gửi · Shift+Enter xuống dòng · dán hoặc kéo-thả ảnh, video",
 };

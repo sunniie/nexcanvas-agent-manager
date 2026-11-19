@@ -45,7 +45,7 @@ function describeItem(lang: Lang, item: any): string | undefined {
 
 export function runCodex(req: TurnRequest): Promise<TurnResult> {
   const sandbox = sandboxFor(req);
-  const needsNetwork = req.granted.some((c) => c === 'network' || c === 'git_push' || c === 'deploy' || c === 'install_deps');
+  const needsNetwork = req.granted.some((c) => c === 'network' || c === 'git_push' || c === 'deploy' || c === 'install_deps' || c === 'publish');
   // `--image=<file>` (with "=") so the multi-value flag never swallows the trailing "-" (prompt from stdin).
   const images = (req.images ?? []).filter((f) => fs.existsSync(f)).map((f) => `--image=${f}`);
   const common = [...images, '--json', '--skip-git-repo-check', '-m', req.model, '-c', `sandbox_mode="${sandbox}"`];
